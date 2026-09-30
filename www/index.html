@@ -1,1 +1,358 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12352b">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<title>Relevé terrain</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--bg:#12352b;--ink:#f4f7f2;--acc:#f2c230;--mut:#9db8ad;--line:#2a5646}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font:16px/1.4 system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+#map{position:absolute;inset:0 0 72px 0}
+#bar{position:absolute;left:0;right:0;bottom:0;height:72px;padding-bottom:env(safe-area-inset-bottom);display:flex;background:var(--bg);border-top:2px solid var(--acc);z-index:1000}
+#bar button{flex:1;border:0;background:none;color:var(--ink);font:inherit;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+#bar button b{font-size:22px;font-weight:400}
+#bar button.rec{color:var(--acc)}
+#status{position:absolute;top:8px;left:8px;right:8px;z-index:1000;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
+#status span{background:var(--bg);padding:4px 10px;border-radius:14px;font-size:13px}
+.sheet{position:fixed;inset:0;z-index:2000;background:var(--bg);overflow:auto;padding:16px;padding-top:calc(16px + env(safe-area-inset-top));display:none}
+.sheet.on{display:block}
+.sheet h2{margin:0 0 12px;font-size:20px}
+label{display:block;margin:12px 0 4px;color:var(--mut);font-size:14px}
+input[type=text],textarea,select{width:100%;padding:12px;border-radius:6px;border:1px solid var(--line);background:#0c2620;color:var(--ink);font:inherit}
+.row{display:flex;gap:8px;margin-top:12px}
+.btn{flex:1;padding:12px;border-radius:6px;border:1px solid var(--line);background:none;color:var(--ink);font:inherit;text-align:center}
+.btn.p{background:var(--acc);color:#12352b;border-color:var(--acc);font-weight:600}
+#thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+#thumbs img{width:72px;height:72px;object-fit:cover;border-radius:4px}
+.item{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.item div{flex:1}.item small{color:var(--mut);display:block}
+.item button{border:0;background:none;color:var(--mut);font-size:20px;padding:6px 10px}
+h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
+#trkBar{position:absolute;left:8px;right:8px;bottom:80px;z-index:1000;display:flex;gap:8px}
+#trkBar[hidden]{display:none}
+#trkBar .btn{background:var(--bg);border-color:var(--acc)}
+#bGps{position:absolute;top:46px;left:8px;z-index:1000;background:var(--bg);color:var(--ink);border:1px solid var(--acc);border-radius:18px;padding:6px 12px;font:inherit;font-size:14px}
+.vide{color:var(--mut);padding:12px 0}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="status"><span id="gps">GPS : recherche…</span><span id="rec" hidden></span></div>
+<button id="bGps">📡 Activer le GPS</button>
+<div id="trkBar" hidden>
+  <button class="btn" id="tPhoto">📷 Photo ici</button>
+  <button class="btn" id="tUndo" hidden>↶ Annuler le dernier point</button>
+</div>
+<input type="file" id="iTrk" accept="image/*" capture="environment" hidden>
+<nav id="bar">
+  <button id="bPoint"><b>📍</b>Point</button>
+  <button id="bTrack"><b>⏺</b><span id="tLbl">Trajet</span></button>
+  <button id="bList"><b>☰</b>Liste</button>
+  <button id="bExp"><b>⬇</b>Export</button>
+</nav>
 
+<section class="sheet" id="fPoint">
+  <h2>Nouveau point</h2>
+  <label for="pName">Nom du point (nom du dossier photos)</label>
+  <input type="text" id="pName" autocomplete="off" placeholder="ex. POT-001">
+  <div id="custom"></div>
+  <label for="pNote">Remarque</label>
+  <textarea id="pNote" rows="3"></textarea>
+  <div class="row">
+    <button class="btn" id="bCam">📷 Prendre une photo</button>
+    <button class="btn" id="bGal">🖼 Galerie</button>
+  </div>
+  <input type="file" id="iCam" accept="image/*" capture="environment" hidden>
+  <input type="file" id="iGal" accept="image/*" multiple hidden>
+  <div id="thumbs"></div>
+  <div class="row">
+    <button class="btn" id="pCancel">Annuler</button>
+    <button class="btn p" id="pSave">Enregistrer le point</button>
+  </div>
+</section>
+
+<section class="sheet" id="fGps">
+  <h2>Activer le GPS</h2>
+  <div class="vide" id="gMsg"></div>
+  <div class="vide">Une application web ne peut pas ouvrir elle-même les paramètres d'Android : suis les étapes ci-dessus, puis reviens ici.</div>
+  <div class="row"><button class="btn" id="gClose">Fermer</button><button class="btn p" id="gRetry">Réessayer</button></div>
+</section>
+
+<section class="sheet" id="fMode">
+  <h2>Nouveau trajet</h2>
+  <button class="btn p" id="mAuto" style="width:100%">Automatique : suivre le GPS</button>
+  <div class="vide">Le tracé se dessine pendant que tu marches ou roules.</div>
+  <button class="btn" id="mMan" style="width:100%">Manuel : dessiner sur la carte</button>
+  <div class="vide">Touche la carte pour ajouter chaque sommet du tracé.</div>
+  <div class="row"><button class="btn" id="mCancel">Annuler</button></div>
+</section>
+
+<section class="sheet" id="fList">
+  <h2>Relevé</h2>
+  <h3>Points</h3><div id="lPts"></div>
+  <h3>Trajets</h3><div id="lTrk"></div>
+  <div class="row"><button class="btn p" id="lClose">Fermer</button></div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+
+/* ---------- Champs personnalisés : à modifier ici ----------
+   Liste déroulante : {id, label, options:[...]}   Texte libre : {id, label} */
+const FIELDS = [
+  {id: 'type', label: 'Type', options: ['Appui', 'Chambre', 'Boites', 'SRO', 'Immeuble', 'Villa']}
+];
+$('#custom').innerHTML = FIELDS.map(f => `<label for="f_${f.id}">${f.label}</label>` + (f.options
+  ? `<select id="f_${f.id}"><option value="">Choisir…</option>${f.options.map(o => `<option>${o}</option>`).join('')}</select>`
+  : `<input type="text" id="f_${f.id}" autocomplete="off">`)).join('');
+
+/* ---------- Stockage local (IndexedDB) ---------- */
+const DB = (() => {
+  const open = new Promise((ok, ko) => {
+    const r = indexedDB.open('releve', 1);
+    r.onupgradeneeded = () => {
+      r.result.createObjectStore('points', {keyPath: 'name'});
+      r.result.createObjectStore('tracks', {keyPath: 'id', autoIncrement: true});
+    };
+    r.onsuccess = () => ok(r.result); r.onerror = ko;
+  });
+  const tx = async (s, m, f) => { const d = await open;
+    return new Promise((ok, ko) => { const t = d.transaction(s, m), q = f(t.objectStore(s));
+      t.oncomplete = () => ok(q.result); t.onerror = ko; }); };
+  return { all: s => tx(s, 'readonly', o => o.getAll()),
+           put: (s, v) => tx(s, 'readwrite', o => o.put(v)),
+           del: (s, k) => tx(s, 'readwrite', o => o.delete(k)) };
+})();
+
+/* ---------- Carte ---------- */
+const map = L.map('map', {zoomControl: false}).setView([34.0, 9.0], 6);
+const plan = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'});
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom: 19, attribution: 'Esri'});
+sat.addTo(map);
+L.control.layers({'Satellite': sat, 'Plan': plan}, null, {position: 'topright'}).addTo(map);
+L.control.scale({imperial: false}).addTo(map);
+const layerPts = L.layerGroup().addTo(map), layerTrk = L.layerGroup().addTo(map);
+let me = null, meDot = null, first = true;
+
+/* ---------- GPS ---------- */
+let rec = null; // trajet en cours
+let wid = null, gpsErr = 0;
+const onPos = p => {
+  gpsErr = 0; $('#bGps').textContent = '🎯';
+  me = {lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, alt: p.coords.altitude};
+  $('#gps').textContent = 'GPS ±' + Math.round(me.acc) + ' m';
+  if (!meDot) meDot = L.circleMarker([me.lat, me.lng], {radius: 8, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(map);
+  else meDot.setLatLng([me.lat, me.lng]);
+  if (first) { map.setView([me.lat, me.lng], 18); first = false; }
+  if (rec && rec.mode === 'auto' && me.acc < 50) {
+    const last = rec.pts[rec.pts.length - 1];
+    if (!last || map.distance([last[1], last[0]], [me.lat, me.lng]) > 3) {
+      rec.pts.push([me.lng, me.lat, Date.now()]);
+      rec.line.setLatLngs(rec.pts.map(q => [q[1], q[0]]));
+      recStatus();
+    }
+  }
+};
+const onErr = e => { gpsErr = e.code; $('#gps').textContent = 'GPS indisponible'; $('#bGps').textContent = '📡 Activer le GPS'; };
+function startGps() {
+  if (wid !== null) navigator.geolocation.clearWatch(wid);
+  $('#gps').textContent = 'GPS : recherche…';
+  wid = navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy: true, maximumAge: 2000, timeout: 20000});
+}
+startGps();
+$('#bGps').onclick = () => {
+  if (me && !gpsErr) return map.setView([me.lat, me.lng], Math.max(map.getZoom(), 18));
+  $('#gMsg').innerHTML = gpsErr === 1
+    ? "<b>La position est refusée pour cette application.</b><br>Dans Chrome : touche ⋮ → Paramètres → Paramètres des sites → Localisation → autorise ce site. Application installée : appui long sur l'icône → Infos sur l'application → Autorisations → Position → Autoriser."
+    : "<b>Le GPS du téléphone est désactivé ou sans signal.</b><br>Glisse le volet rapide vers le bas et touche « Localisation » (ou Paramètres → Localisation → Activer). Mets-toi à l'extérieur si besoin.";
+  $('#fGps').classList.add('on');
+};
+$('#gClose').onclick = () => $('#fGps').classList.remove('on');
+$('#gRetry').onclick = () => { $('#fGps').classList.remove('on'); startGps(); };
+
+const len = pts => pts.reduce((s, q, i) => i ? s + map.distance([pts[i-1][1], pts[i-1][0]], [q[1], q[0]]) : 0, 0);
+
+/* ---------- Points ---------- */
+let photos = [], target = null;
+const thumbs = () => { $('#thumbs').innerHTML = ''; photos.forEach(b => { const i = new Image(); i.src = URL.createObjectURL(b); $('#thumbs').append(i); }); };
+const shrink = f => new Promise(ok => {
+  const img = new Image(); img.onload = () => {
+    const k = Math.min(1, 1920 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+    c.width = img.width * k; c.height = img.height * k; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    c.toBlob(b => ok(b || f), 'image/jpeg', 0.85); URL.revokeObjectURL(img.src); };
+  img.onerror = () => ok(f); img.src = URL.createObjectURL(f); });
+const addPhotos = async e => { for (const f of e.target.files) photos.push(await shrink(f)); e.target.value = ''; thumbs(); };
+$('#iCam').onchange = addPhotos; $('#iGal').onchange = addPhotos;
+$('#bCam').onclick = () => $('#iCam').click(); $('#bGal').onclick = () => $('#iGal').click();
+
+function newPoint(pos) {
+  if (!pos) return alert('Position GPS non disponible. Touchez la carte pour placer le point à la main.');
+  target = pos; photos = []; thumbs(); $('#pName').value = ''; $('#pNote').value = ''; FIELDS.forEach(f => $('#f_' + f.id).value = '');
+  $('#fPoint').classList.add('on'); $('#pName').focus();
+}
+$('#bPoint').onclick = () => newPoint(me);
+let clicked = null;
+map.on('click', e => { if (rec && rec.mode === 'manual') return addVertex(e.latlng); clicked = e.latlng; L.popup().setLatLng(clicked)
+  .setContent('<a href="#" id="hand">Créer un point ici</a>').openOn(map); });
+document.addEventListener('click', e => { if (e.target.id === 'hand') { e.preventDefault(); map.closePopup(); newPoint({lat: clicked.lat, lng: clicked.lng, acc: null}); } });
+$('#pCancel').onclick = () => $('#fPoint').classList.remove('on');
+$('#pSave').onclick = async () => {
+  const name = $('#pName').value.trim();
+  if (!name) return alert('Saisissez un nom de point.');
+  const fv = {};
+  for (const f of FIELDS) { fv[f.id] = $('#f_' + f.id).value.trim(); if (f.options && !fv[f.id]) return alert('Choisissez : ' + f.label + '.'); }
+  if ((await DB.all('points')).some(p => p.name === name)) return alert('Ce nom existe déjà. Choisissez un autre nom.');
+  await DB.put('points', {name, f: fv, note: $('#pNote').value.trim(), lat: target.lat, lng: target.lng, acc: target.acc, alt: target.alt ?? null, t: new Date().toISOString(), photos});
+  $('#fPoint').classList.remove('on'); draw();
+};
+
+/* ---------- Trajets : automatique (GPS) ou manuel (carte), photos en option ---------- */
+const recStatus = () => { $('#rec').textContent = '⏺ ' + rec.pts.length + ' pts · ' + Math.round(len(rec.pts)) + ' m · 📷 ' + rec.photos.length; };
+const redraw = () => rec.line.setLatLngs(rec.pts.map(q => [q[1], q[0]]));
+function addVertex(ll) { rec.pts.push([ll.lng, ll.lat, Date.now()]); redraw(); recStatus(); }
+$('#tUndo').onclick = () => { if (rec && rec.pts.length) { rec.pts.pop(); redraw(); recStatus(); } };
+function startTrack(mode) {
+  $('#fMode').classList.remove('on');
+  if (mode === 'auto' && !me) return alert('Position GPS non disponible.');
+  rec = {mode, pts: [], photos: [], t0: new Date().toISOString(),
+         line: L.polyline([], {color: '#f2c230', weight: 5}).addTo(map), marks: L.layerGroup().addTo(map)};
+  $('#bTrack').classList.add('rec'); $('#tLbl').textContent = 'Arrêter';
+  $('#rec').hidden = false; $('#trkBar').hidden = false; $('#tUndo').hidden = mode !== 'manual';
+  recStatus();
+}
+$('#bTrack').onclick = () => rec ? stopTrack() : $('#fMode').classList.add('on');
+$('#mAuto').onclick = () => startTrack('auto'); $('#mMan').onclick = () => startTrack('manual');
+$('#mCancel').onclick = () => $('#fMode').classList.remove('on');
+$('#tPhoto').onclick = () => $('#iTrk').click();
+$('#iTrk').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f || !rec) return;
+  const last = rec.pts[rec.pts.length - 1];
+  const pos = me ? {lat: me.lat, lng: me.lng} : last ? {lat: last[1], lng: last[0]} : map.getCenter();
+  rec.photos.push({blob: await shrink(f), lat: pos.lat, lng: pos.lng, t: new Date().toISOString()});
+  L.circleMarker([pos.lat, pos.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(rec.marks);
+  recStatus();
+};
+async function stopTrack() {
+  const r = rec; rec = null; map.removeLayer(r.line); map.removeLayer(r.marks);
+  $('#bTrack').classList.remove('rec'); $('#tLbl').textContent = 'Trajet';
+  $('#rec').hidden = true; $('#trkBar').hidden = true;
+  if (r.pts.length < 2) return alert('Trajet trop court, non enregistré.');
+  const def = 'Trajet ' + new Date().toLocaleString('fr-FR');
+  const n = (prompt('Nom du trajet :', def) || '').trim();
+  await DB.put('tracks', {name: n || def, t: r.t0, mode: r.mode, pts: r.pts, photos: r.photos}); draw();
+}
+
+/* ---------- Affichage ---------- */
+async function draw() {
+  layerPts.clearLayers(); layerTrk.clearLayers();
+  const P = await DB.all('points'), T = await DB.all('tracks');
+  P.forEach(p => L.circleMarker([p.lat, p.lng], {radius: 9, color: '#12352b', weight: 2, fillColor: '#f2c230', fillOpacity: 1}).bindTooltip(p.name, {permanent: true, direction: 'top', offset: [0, -8]}).addTo(layerPts));
+  T.forEach(t => {
+    L.polyline(t.pts.map(q => [q[1], q[0]]), {color: '#e4572e', weight: 4}).bindTooltip(t.name).addTo(layerTrk);
+    (t.photos || []).forEach(ph => L.circleMarker([ph.lat, ph.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(layerTrk));
+  });
+  $('#lPts').innerHTML = P.length ? '' : '<div class="vide">Aucun point. Touchez 📍 pour en créer un.</div>';
+  P.forEach(p => { const d = document.createElement('div'); d.className = 'item';
+    d.innerHTML = `<div><b></b><small>${p.f && p.f.type ? p.f.type + ' · ' : ''}${p.photos.length} photo(s) · ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</small></div><button>🗑</button>`;
+    d.querySelector('b').textContent = p.name;
+    d.firstChild.onclick = () => { $('#fList').classList.remove('on'); map.setView([p.lat, p.lng], 19); };
+    d.lastChild.onclick = async () => { if (confirm('Supprimer « ' + p.name + ' » ?')) { await DB.del('points', p.name); draw(); } };
+    $('#lPts').append(d); });
+  $('#lTrk').innerHTML = T.length ? '' : '<div class="vide">Aucun trajet. Touchez ⏺ pour en enregistrer un.</div>';
+  T.forEach(t => { const d = document.createElement('div'); d.className = 'item';
+    d.innerHTML = `<div><b></b><small>${t.mode === 'manual' ? 'Manuel' : 'GPS'} · ${Math.round(len(t.pts))} m · ${(t.photos || []).length} photo(s)</small></div><button>🗑</button>`;
+    d.querySelector('b').textContent = t.name;
+    d.firstChild.onclick = () => { $('#fList').classList.remove('on'); map.fitBounds(t.pts.map(q => [q[1], q[0]])); };
+    d.lastChild.onclick = async () => { if (confirm('Supprimer « ' + t.name + ' » ?')) { await DB.del('tracks', t.id); draw(); } };
+    $('#lTrk').append(d); });
+}
+$('#bList').onclick = () => $('#fList').classList.add('on');
+$('#lClose').onclick = () => $('#fList').classList.remove('on');
+
+/* ---------- Export : un seul ZIP (dossier avec photos, CSV, GeoJSON, KMZ) ---------- */
+const safe = s => s.replace(/[\\/:*?"<>|]/g, '_').trim() || 'point';
+const day = () => new Date().toISOString().slice(0, 10);
+async function exportAll() {
+  const P = await DB.all('points'), T = await DB.all('tracks');
+  if (!P.length && !T.length) return alert('Rien à exporter.');
+  const out = new JSZip(), z = out.folder('releve_' + day()), csv = ['nom;' + FIELDS.map(f => f.id).join(';') + ';lat;lng;precision_m;altitude;date;remarque;nb_photos'];
+  P.forEach(p => {
+    const dir = z.folder(safe(p.name));
+    p.photos.forEach((b, i) => dir.file(safe(p.name) + '_' + (i + 1) + '.jpg', b));
+    csv.push([p.name, ...FIELDS.map(f => (p.f || {})[f.id] || ''), p.lat, p.lng, p.acc ?? '', p.alt ?? '', p.t, (p.note || '').replace(/[;\n]/g, ' '), p.photos.length].join(';'));
+  });
+  z.file('points.csv', csv.join('\n'));
+  z.file('points.geojson', JSON.stringify({type: 'FeatureCollection', features: P.map(p => ({type: 'Feature',
+    geometry: {type: 'Point', coordinates: [p.lng, p.lat]},
+    properties: {name: p.name, ...(p.f || {}), note: p.note, date: p.t, precision_m: p.acc, photos: p.photos.map((_, i) => safe(p.name) + '/' + safe(p.name) + '_' + (i + 1) + '.jpg')}}))}, null, 1));
+  const used = new Set(), dirs = new Map(), tph = [];
+  T.forEach(t => { let d = safe(t.name); if (used.has(d)) d += '_' + t.id; used.add(d); dirs.set(t.id, d); });
+  T.forEach(t => (t.photos || []).forEach((ph, i) => {
+    const d = dirs.get(t.id), fn = 'trajets/' + d + '/' + d + '_' + (i + 1) + '.jpg';
+    z.file(fn, ph.blob);
+    tph.push({type: 'Feature', geometry: {type: 'Point', coordinates: [ph.lng, ph.lat]}, properties: {trajet: t.name, date: ph.t, photo: fn}});
+  }));
+  if (tph.length) z.file('photos_trajets.geojson', JSON.stringify({type: 'FeatureCollection', features: tph}, null, 1));
+  z.file('trajets.geojson', JSON.stringify({type: 'FeatureCollection', features: T.map(t => ({type: 'Feature',
+    geometry: {type: 'LineString', coordinates: t.pts.map(q => [q[0], q[1]])},
+    properties: {name: t.name, date: t.t, mode: t.mode || 'auto', longueur_m: Math.round(len(t.pts)), nb_photos: (t.photos || []).length}}))}, null, 1));
+  z.file('releve.kmz', await buildKmz(P, T));
+  await deliver(await out.generateAsync({type: 'blob'}), 'releve_' + day() + '.zip', 'application/zip');
+}
+
+const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+async function deliver(blob, fn, type) {
+  if (NATIVE) {  // application Android : écrire le fichier puis ouvrir le partage
+    const {Filesystem, Share} = Capacitor.Plugins;
+    const data = await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.onerror = ko; r.readAsDataURL(blob); });
+    const w = await Filesystem.writeFile({path: fn, data, directory: 'CACHE'});
+    return Share.share({title: fn, url: w.uri});
+  }
+  const file = new File([blob], fn, {type});
+  if (navigator.canShare && navigator.canShare({files: [file]})) { try { await navigator.share({files: [file]}); return; } catch (e) { if (e.name === 'AbortError') return; } }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn; a.click();
+}
+
+const esc = v => String(v ?? '').replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+async function buildKmz(P, T) {
+  const z = new JSZip(), used = new Set(), pm = [], tk = [], ph = [];
+  const img = (fn, blob) => { z.file(fn, blob); return `<img src="${encodeURI(fn).replace(/&/g, '%26')}" width="400"/><br/>`; };
+  P.forEach(p => {
+    const d = safe(p.name), fl = p.f || {};
+    const pics = p.photos.map((b, i) => img('files/' + d + '/' + d + '_' + (i + 1) + '.jpg', b)).join('');
+    pm.push(`<Placemark><name>${esc(p.name)}</name><styleUrl>#pt</styleUrl><description><![CDATA[${pics}${esc(p.note)}]]></description>` +
+      `<ExtendedData>${FIELDS.map(f => `<Data name="${f.id}"><value>${esc(fl[f.id])}</value></Data>`).join('')}<Data name="date"><value>${p.t}</value></Data></ExtendedData>` +
+      `<Point><coordinates>${p.lng},${p.lat},0</coordinates></Point></Placemark>`);
+  });
+  T.forEach(t => {
+    let d = safe(t.name); if (used.has(d)) d += '_' + t.id; used.add(d);
+    tk.push(`<Placemark><name>${esc(t.name)}</name><styleUrl>#ln</styleUrl><description>${Math.round(len(t.pts))} m</description><LineString><tessellate>1</tessellate><coordinates>${t.pts.map(q => q[0] + ',' + q[1] + ',0').join(' ')}</coordinates></LineString></Placemark>`);
+    (t.photos || []).forEach((h, i) => ph.push(`<Placemark><name>${esc(t.name)} - photo ${i + 1}</name><styleUrl>#pt</styleUrl><description><![CDATA[${img('files/trajets/' + d + '/' + d + '_' + (i + 1) + '.jpg', h.blob)}]]></description><Point><coordinates>${h.lng},${h.lat},0</coordinates></Point></Placemark>`));
+  });
+  const folder = (n, a) => a.length ? `<Folder><name>${n}</name>${a.join('')}</Folder>` : '';
+  const doc = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Relevé terrain ${day()}</name>` +
+    `<Style id="pt"><IconStyle><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon></IconStyle></Style>` +
+    `<Style id="ln"><LineStyle><color>ff2e57e4</color><width>4</width></LineStyle></Style>` +
+    folder('Points', pm) + folder('Trajets', tk) + folder('Photos des trajets', ph) + `</Document></kml>`;
+  z.file('doc.kml', doc);
+  return z.generateAsync({type: 'blob', mimeType: 'application/vnd.google-earth.kmz'});
+}
+
+$('#bExp').onclick = async () => {
+  const b = $('#bExp'); b.disabled = true; b.querySelector('b').textContent = '⏳';
+  try { await exportAll(); } catch (e) { alert('Export impossible : ' + e.message); }
+  b.disabled = false; b.querySelector('b').textContent = '⬇';
+};
+
+draw();
+if ('serviceWorker' in navigator && !NATIVE) navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
