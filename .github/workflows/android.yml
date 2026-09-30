@@ -38,6 +38,11 @@ jobs:
       - name: Créer le projet Android
         run: npx cap add android
 
+      - name: Icône de l'application
+        run: |
+          pip install pillow numpy scipy
+          python make_icons.py
+
       - name: Permissions (GPS et appareil photo)
         run: |
           sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
