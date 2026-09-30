@@ -45,8 +45,9 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 <div id="status"><span id="gps">GPS : recherche…</span><span id="rec" hidden></span></div>
 <button id="bGps">📡 Activer le GPS</button>
 <div id="trkBar" hidden>
-  <button class="btn" id="tPhoto">📷 Photo ici</button>
-  <button class="btn" id="tUndo" hidden>↶ Annuler le dernier point</button>
+  <button class="btn" id="tPhoto">📷 Photo</button>
+  <button class="btn" id="tPoint">📍 Point</button>
+  <button class="btn" id="tUndo" hidden>↶ Annuler</button>
 </div>
 <input type="file" id="iTrk" accept="image/*" capture="environment" hidden>
 <nav id="bar">
@@ -180,21 +181,27 @@ $('#gRetry').onclick = () => { $('#fGps').classList.remove('on'); startGps(); };
 const len = pts => pts.reduce((s, q, i) => i ? s + map.distance([pts[i-1][1], pts[i-1][0]], [q[1], q[0]]) : 0, 0);
 
 /* ---------- Points ---------- */
-let photos = [], target = null;
+let photos = [], jobs = [], target = null;
 const thumbs = () => { $('#thumbs').innerHTML = ''; photos.forEach(b => { const i = new Image(); i.src = URL.createObjectURL(b); $('#thumbs').append(i); }); };
-const shrink = f => new Promise(ok => {
-  const img = new Image(); img.onload = () => {
-    const k = Math.min(1, 1920 / Math.max(img.width, img.height)), c = document.createElement('canvas');
-    c.width = img.width * k; c.height = img.height * k; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    c.toBlob(b => ok(b || f), 'image/jpeg', 0.85); URL.revokeObjectURL(img.src); };
-  img.onerror = () => ok(f); img.src = URL.createObjectURL(f); });
-const addPhotos = async e => { for (const f of e.target.files) photos.push(await shrink(f)); e.target.value = ''; thumbs(); };
+const shrink = async f => {
+  try {
+    const bmp = await createImageBitmap(f), k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); if (bmp.close) bmp.close();
+    return await new Promise(ok => c.toBlob(b => ok(b || f), 'image/jpeg', 0.8));
+  } catch (e) { return f; }
+};
+const addPhotos = e => {  // la photo apparaît tout de suite ; la réduction se fait en arrière-plan
+  const fs = [...e.target.files], arr = photos; e.target.value = '';
+  fs.forEach(f => { const i = arr.push(f) - 1; jobs.push(shrink(f).then(b => { arr[i] = b; })); });
+  thumbs();
+};
 $('#iCam').onchange = addPhotos; $('#iGal').onchange = addPhotos;
 $('#bCam').onclick = () => $('#iCam').click(); $('#bGal').onclick = () => $('#iGal').click();
 
 function newPoint(pos) {
   if (!pos) return alert('Position GPS non disponible. Touchez la carte pour placer le point à la main.');
-  target = pos; photos = []; thumbs(); $('#pName').value = ''; $('#pNote').value = ''; FIELDS.forEach(f => $('#f_' + f.id).value = '');
+  target = pos; photos = []; jobs = []; thumbs(); $('#pName').value = ''; $('#pNote').value = ''; FIELDS.forEach(f => $('#f_' + f.id).value = '');
   $('#fPoint').classList.add('on'); $('#pName').focus();
 }
 $('#bPoint').onclick = () => newPoint(me);
@@ -209,19 +216,24 @@ $('#pSave').onclick = async () => {
   const fv = {};
   for (const f of FIELDS) { fv[f.id] = $('#f_' + f.id).value.trim(); if (f.options && !fv[f.id]) return alert('Choisissez : ' + f.label + '.'); }
   if ((await DB.all('points')).some(p => p.name === name)) return alert('Ce nom existe déjà. Choisissez un autre nom.');
+  await Promise.all(jobs);
   await DB.put('points', {name, f: fv, note: $('#pNote').value.trim(), lat: target.lat, lng: target.lng, acc: target.acc, alt: target.alt ?? null, t: new Date().toISOString(), photos});
   $('#fPoint').classList.remove('on'); draw();
 };
 
 /* ---------- Trajets : automatique (GPS) ou manuel (carte), photos en option ---------- */
 const recStatus = () => { $('#rec').textContent = '⏺ ' + rec.pts.length + ' pts · ' + Math.round(len(rec.pts)) + ' m · 📷 ' + rec.photos.length; };
+const recPos = () => {  // manuel : dernier point tracé ; automatique : position GPS
+  const l = rec.pts[rec.pts.length - 1], gps = me && {lat: me.lat, lng: me.lng}, lv = l && {lat: l[1], lng: l[0]};
+  return (rec.mode === 'manual' ? lv || gps : gps || lv) || map.getCenter();
+};
 const redraw = () => rec.line.setLatLngs(rec.pts.map(q => [q[1], q[0]]));
 function addVertex(ll) { rec.pts.push([ll.lng, ll.lat, Date.now()]); redraw(); recStatus(); }
 $('#tUndo').onclick = () => { if (rec && rec.pts.length) { rec.pts.pop(); redraw(); recStatus(); } };
 function startTrack(mode) {
   $('#fMode').classList.remove('on');
   if (mode === 'auto' && !me) return alert('Position GPS non disponible.');
-  rec = {mode, pts: [], photos: [], t0: new Date().toISOString(),
+  rec = {mode, pts: [], photos: [], jobs: [], t0: new Date().toISOString(),
          line: L.polyline([], {color: '#f2c230', weight: 5}).addTo(map), marks: L.layerGroup().addTo(map)};
   $('#bTrack').classList.add('rec'); $('#tLbl').textContent = 'Arrêter';
   $('#rec').hidden = false; $('#trkBar').hidden = false; $('#tUndo').hidden = mode !== 'manual';
@@ -231,14 +243,18 @@ $('#bTrack').onclick = () => rec ? stopTrack() : $('#fMode').classList.add('on')
 $('#mAuto').onclick = () => startTrack('auto'); $('#mMan').onclick = () => startTrack('manual');
 $('#mCancel').onclick = () => $('#fMode').classList.remove('on');
 $('#tPhoto').onclick = () => $('#iTrk').click();
-$('#iTrk').onchange = async e => {
-  const f = e.target.files[0]; e.target.value = ''; if (!f || !rec) return;
-  const last = rec.pts[rec.pts.length - 1];
-  const gps = me && {lat: me.lat, lng: me.lng}, lv = last && {lat: last[1], lng: last[0]};
-  const pos = (rec.mode === 'manual' ? lv || gps : gps || lv) || map.getCenter();  // manuel : dernier point tracé
-  rec.photos.push({blob: await shrink(f), lat: pos.lat, lng: pos.lng, t: new Date().toISOString()});
-  L.circleMarker([pos.lat, pos.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(rec.marks);
+$('#tPoint').onclick = () => {
+  if (!rec) return;
+  const p = recPos();
+  newPoint(rec.mode === 'auto' && me ? me : {lat: p.lat, lng: p.lng, acc: null});
+};
+$('#iTrk').onchange = e => {
+  const f = e.target.files[0], r = rec; e.target.value = ''; if (!f || !r) return;
+  const pos = recPos(), ph = {blob: f, lat: pos.lat, lng: pos.lng, t: new Date().toISOString()};
+  r.photos.push(ph);  // enregistrée tout de suite, réduite en arrière-plan
+  L.circleMarker([pos.lat, pos.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(r.marks);
   recStatus();
+  r.jobs.push(shrink(f).then(b => { ph.blob = b; }));
 };
 async function stopTrack() {
   const r = rec; rec = null; map.removeLayer(r.line); map.removeLayer(r.marks);
@@ -247,6 +263,7 @@ async function stopTrack() {
   if (r.pts.length < 2) return alert('Trajet trop court, non enregistré.');
   const def = 'Trajet ' + new Date().toLocaleString('fr-FR');
   const n = (prompt('Nom du trajet :', def) || '').trim();
+  await Promise.all(r.jobs);
   await DB.put('tracks', {name: n || def, t: r.t0, mode: r.mode, pts: r.pts, photos: r.photos}); draw();
 }
 
