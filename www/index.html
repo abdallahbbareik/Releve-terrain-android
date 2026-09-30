@@ -234,7 +234,8 @@ $('#tPhoto').onclick = () => $('#iTrk').click();
 $('#iTrk').onchange = async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f || !rec) return;
   const last = rec.pts[rec.pts.length - 1];
-  const pos = me ? {lat: me.lat, lng: me.lng} : last ? {lat: last[1], lng: last[0]} : map.getCenter();
+  const gps = me && {lat: me.lat, lng: me.lng}, lv = last && {lat: last[1], lng: last[0]};
+  const pos = (rec.mode === 'manual' ? lv || gps : gps || lv) || map.getCenter();  // manuel : dernier point tracé
   rec.photos.push({blob: await shrink(f), lat: pos.lat, lng: pos.lng, t: new Date().toISOString()});
   L.circleMarker([pos.lat, pos.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(rec.marks);
   recStatus();
@@ -307,14 +308,7 @@ async function exportAll() {
   await deliver(await out.generateAsync({type: 'blob'}), 'releve_' + day() + '.zip', 'application/zip');
 }
 
-const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
 async function deliver(blob, fn, type) {
-  if (NATIVE) {  // application Android : écrire le fichier puis ouvrir le partage
-    const {Filesystem, Share} = Capacitor.Plugins;
-    const data = await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.onerror = ko; r.readAsDataURL(blob); });
-    const w = await Filesystem.writeFile({path: fn, data, directory: 'CACHE'});
-    return Share.share({title: fn, url: w.uri});
-  }
   const file = new File([blob], fn, {type});
   if (navigator.canShare && navigator.canShare({files: [file]})) { try { await navigator.share({files: [file]}); return; } catch (e) { if (e.name === 'AbortError') return; } }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn; a.click();
@@ -352,7 +346,7 @@ $('#bExp').onclick = async () => {
 };
 
 draw();
-if ('serviceWorker' in navigator && !NATIVE) navigator.serviceWorker.register('sw.js');
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>
