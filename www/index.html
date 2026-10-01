@@ -36,6 +36,9 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 #trkBar{position:absolute;left:8px;right:8px;bottom:80px;z-index:1000;display:flex;gap:8px}
 #trkBar[hidden]{display:none}
 #trkBar .btn{background:var(--bg);border-color:var(--acc)}
+#thumbs .th{position:relative}
+#thumbs .th b{position:absolute;top:-6px;right:-6px;width:24px;height:24px;border-radius:50%;background:#e4572e;color:#fff;font:700 14px/24px sans-serif;text-align:center}
+.item .ed{font-size:18px}
 #bNorth{position:absolute;top:88px;left:8px;z-index:1000;width:46px;height:46px;border-radius:50%;background:var(--bg);border:1px solid var(--acc);padding:0;display:flex;align-items:center;justify-content:center}
 #bGps{position:absolute;top:46px;left:8px;z-index:1000;background:var(--bg);color:var(--ink);border:1px solid var(--acc);border-radius:18px;padding:6px 12px;font:inherit;font-size:14px}
 .vide{color:var(--mut);padding:12px 0}
@@ -60,7 +63,7 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 </nav>
 
 <section class="sheet" id="fPoint">
-  <h2>Nouveau point</h2>
+  <h2 id="pTitle">Nouveau point</h2>
   <label for="pName">Nom du point (nom du dossier photos)</label>
   <input type="text" id="pName" autocomplete="off" placeholder="ex. POT-001">
   <div id="custom"></div>
@@ -73,6 +76,7 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
   <input type="file" id="iCam" accept="image/*" capture="environment" hidden>
   <input type="file" id="iGal" accept="image/*" multiple hidden>
   <div id="thumbs"></div>
+  <div class="row"><button class="btn" id="pGps" hidden>📍 Mettre à jour la position (GPS)</button></div>
   <div class="row">
     <button class="btn" id="pCancel">Annuler</button>
     <button class="btn p" id="pSave">Enregistrer le point</button>
@@ -190,8 +194,16 @@ $('#gRetry').onclick = () => { $('#fGps').classList.remove('on'); startGps(); };
 const len = pts => pts.reduce((s, q, i) => i ? s + map.distance([pts[i-1][1], pts[i-1][0]], [q[1], q[0]]) : 0, 0);
 
 /* ---------- Points ---------- */
-let photos = [], jobs = [], target = null;
-const thumbs = () => { $('#thumbs').innerHTML = ''; photos.forEach(b => { const i = new Image(); i.src = URL.createObjectURL(b); $('#thumbs').append(i); }); };
+let items = [], jobs = [], target = null, editing = null;  // items : photos du formulaire
+const thumbs = () => {
+  const box = $('#thumbs'); box.innerHTML = '';
+  items.forEach((it, i) => {
+    const w = document.createElement('div'), im = new Image(), x = document.createElement('b');
+    w.className = 'th'; im.src = URL.createObjectURL(it.b); x.textContent = '✕';
+    x.onclick = () => { items.splice(i, 1); thumbs(); };  // retirer la photo
+    w.append(im, x); box.append(w);
+  });
+};
 const shrink = async f => {
   try {
     const bmp = await createImageBitmap(f), k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
@@ -201,34 +213,68 @@ const shrink = async f => {
   } catch (e) { return f; }
 };
 const addPhotos = e => {  // la photo apparaît tout de suite ; la réduction se fait en arrière-plan
-  const fs = [...e.target.files], arr = photos; e.target.value = '';
-  fs.forEach(f => { const i = arr.push(f) - 1; jobs.push(shrink(f).then(b => { arr[i] = b; })); });
+  const fs = [...e.target.files]; e.target.value = '';
+  fs.forEach(f => { const it = {b: f}; items.push(it); jobs.push(shrink(f).then(b => { it.b = b; })); });
   thumbs();
 };
 $('#iCam').onchange = addPhotos; $('#iGal').onchange = addPhotos;
 $('#bCam').onclick = () => $('#iCam').click(); $('#bGal').onclick = () => $('#iGal').click();
 
+function openForm(o) {
+  jobs = [];
+  $('#pTitle').textContent = o.title; $('#pName').value = o.name || ''; $('#pNote').value = o.note || '';
+  FIELDS.forEach(f => $('#f_' + f.id).value = (o.f || {})[f.id] || '');
+  $('#custom').hidden = !!o.track; $('#pGps').hidden = !o.gps;
+  $('#pSave').textContent = editing ? 'Enregistrer les modifications' : 'Enregistrer le point';
+  thumbs(); $('#fPoint').classList.add('on');
+}
 function newPoint(pos) {
   if (!pos) return alert('Position GPS non disponible. Touchez la carte pour placer le point à la main.');
-  target = pos; photos = []; jobs = []; thumbs(); $('#pName').value = ''; $('#pNote').value = ''; FIELDS.forEach(f => $('#f_' + f.id).value = '');
-  $('#fPoint').classList.add('on'); $('#pName').focus();
+  editing = null; target = pos; items = [];
+  openForm({title: 'Nouveau point'}); $('#pName').focus();
+}
+function editPoint(p) {
+  editing = {kind: 'point', rec: p}; target = {lat: p.lat, lng: p.lng, acc: p.acc, alt: p.alt};
+  items = p.photos.map(b => ({b}));
+  openForm({title: 'Modifier le point', name: p.name, note: p.note, f: p.f, gps: true});
+}
+function editTrack(t) {
+  editing = {kind: 'track', rec: t}; items = (t.photos || []).map(h => ({b: h.blob, h}));
+  openForm({title: 'Modifier le trajet', name: t.name, note: t.note, track: true});
 }
 $('#bPoint').onclick = () => newPoint(me);
 let clicked = null;
 map.on('click', e => { if (rec && rec.mode === 'manual') return addVertex(e.latlng); clicked = e.latlng; L.popup().setLatLng(clicked)
   .setContent('<a href="#" id="hand">Créer un point ici</a>').openOn(map); });
 document.addEventListener('click', e => { if (e.target.id === 'hand') { e.preventDefault(); map.closePopup(); newPoint({lat: clicked.lat, lng: clicked.lng, acc: null}); } });
-$('#pCancel').onclick = () => $('#fPoint').classList.remove('on');
+$('#pCancel').onclick = () => { $('#fPoint').classList.remove('on'); editing = null; };
+$('#pGps').onclick = () => {
+  if (!me) return alert('Position GPS non disponible.');
+  target = {lat: me.lat, lng: me.lng, acc: me.acc, alt: me.alt}; alert('Position mise à jour avec ta position GPS actuelle.');
+};
 $('#pSave').onclick = async () => {
   const name = $('#pName').value.trim();
-  if (!name) return alert('Saisissez un nom de point.');
-  const fv = {};
-  for (const f of FIELDS) { fv[f.id] = $('#f_' + f.id).value.trim(); if (f.options && !fv[f.id]) return alert('Choisissez : ' + f.label + '.'); }
-  if ((await DB.all('points')).some(p => p.name === name)) return alert('Ce nom existe déjà. Choisissez un autre nom.');
-  await Promise.all(jobs);
-  const pt = {name, f: fv, note: $('#pNote').value.trim(), lat: target.lat, lng: target.lng, acc: target.acc, alt: target.alt ?? null, t: new Date().toISOString(), photos};
-  await DB.put('points', pt); savePointFiles(pt);
-  $('#fPoint').classList.remove('on'); draw();
+  if (!name) return alert('Saisissez un nom.');
+  const ed = editing && editing.rec, now = new Date().toISOString(), note = $('#pNote').value.trim();
+  if (editing && editing.kind === 'track') {
+    await Promise.all(jobs);
+    const l = ed.pts[ed.pts.length - 1], old = safe(ed.name);
+    const pos = me ? {lat: me.lat, lng: me.lng} : l ? {lat: l[1], lng: l[0]} : map.getCenter();  // position des nouvelles photos
+    ed.name = name; ed.note = note; ed.maj = now;
+    ed.photos = items.map(x => x.h ? {...x.h, blob: x.b} : {blob: x.b, lat: pos.lat, lng: pos.lng, t: now});
+    await DB.put('tracks', ed);
+    rmDir('Trajets/' + old).then(() => saveTrackFiles(ed));
+  } else {
+    const fv = {};
+    for (const f of FIELDS) { fv[f.id] = $('#f_' + f.id).value.trim(); if (f.options && !fv[f.id]) return alert('Choisissez : ' + f.label + '.'); }
+    if ((!ed || name !== ed.name) && (await DB.all('points')).some(p => p.name === name)) return alert('Ce nom existe déjà. Choisissez un autre nom.');
+    await Promise.all(jobs);
+    const pt = {name, f: fv, note, lat: target.lat, lng: target.lng, acc: target.acc, alt: target.alt ?? null, t: ed ? ed.t : now, photos: items.map(x => x.b)};
+    if (ed) { pt.maj = now; await DB.del('points', ed.name); }
+    await DB.put('points', pt);
+    if (ed) rmDir('Points/' + safe(ed.name)).then(() => savePointFiles(pt)); else savePointFiles(pt);
+  }
+  $('#fPoint').classList.remove('on'); editing = null; draw();
 };
 
 /* ---------- Trajets : automatique (GPS) ou manuel (carte), photos en option ---------- */
@@ -297,24 +343,26 @@ async function recoverDraft() {
 async function draw() {
   layerPts.clearLayers(); layerTrk.clearLayers();
   const P = await DB.all('points'), T = await DB.all('tracks');
-  P.forEach(p => L.circleMarker([p.lat, p.lng], {radius: 9, color: '#12352b', weight: 2, fillColor: '#f2c230', fillOpacity: 1}).bindTooltip(p.name, {permanent: true, direction: 'top', offset: [0, -8]}).addTo(layerPts));
+  P.forEach(p => L.circleMarker([p.lat, p.lng], {radius: 9, color: '#12352b', weight: 2, fillColor: '#f2c230', fillOpacity: 1, bubblingMouseEvents: false}).bindTooltip(p.name, {permanent: true, direction: 'top', offset: [0, -8]}).on('click', e => rec && rec.mode === 'manual' ? addVertex(e.latlng) : editPoint(p)).addTo(layerPts));
   T.forEach(t => {
     L.polyline(t.pts.map(q => [q[1], q[0]]), {color: '#e4572e', weight: 4}).bindTooltip(t.name).addTo(layerTrk);
     (t.photos || []).forEach(ph => L.circleMarker([ph.lat, ph.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(layerTrk));
   });
   $('#lPts').innerHTML = P.length ? '' : '<div class="vide">Aucun point. Touchez 📍 pour en créer un.</div>';
   P.forEach(p => { const d = document.createElement('div'); d.className = 'item';
-    d.innerHTML = `<div><b></b><small>${p.f && p.f.type ? p.f.type + ' · ' : ''}${p.photos.length} photo(s) · ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</small></div><button>🗑</button>`;
+    d.innerHTML = `<div><b></b><small>${p.f && p.f.type ? p.f.type + ' · ' : ''}${p.photos.length} photo(s) · ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</small></div><button class="ed">✏️</button><button class="del">🗑</button>`;
     d.querySelector('b').textContent = p.name;
     d.firstChild.onclick = () => { $('#fList').classList.remove('on'); map.setView([p.lat, p.lng], 19); };
-    d.lastChild.onclick = async () => { if (confirm('Supprimer « ' + p.name + ' » ?')) { await DB.del('points', p.name); rmDir('Points/' + safe(p.name)); draw(); } };
+    d.querySelector('.ed').onclick = () => { $('#fList').classList.remove('on'); editPoint(p); };
+    d.querySelector('.del').onclick = async () => { if (confirm('Supprimer « ' + p.name + ' » ?')) { await DB.del('points', p.name); rmDir('Points/' + safe(p.name)); draw(); } };
     $('#lPts').append(d); });
   $('#lTrk').innerHTML = T.length ? '' : '<div class="vide">Aucun trajet. Touchez ⏺ pour en enregistrer un.</div>';
   T.forEach(t => { const d = document.createElement('div'); d.className = 'item';
-    d.innerHTML = `<div><b></b><small>${t.mode === 'manual' ? 'Manuel' : 'GPS'} · ${Math.round(len(t.pts))} m · ${(t.photos || []).length} photo(s)</small></div><button>🗑</button>`;
+    d.innerHTML = `<div><b></b><small>${t.mode === 'manual' ? 'Manuel' : 'GPS'} · ${Math.round(len(t.pts))} m · ${(t.photos || []).length} photo(s)</small></div><button class="ed">✏️</button><button class="del">🗑</button>`;
     d.querySelector('b').textContent = t.name;
     d.firstChild.onclick = () => { $('#fList').classList.remove('on'); map.fitBounds(t.pts.map(q => [q[1], q[0]])); };
-    d.lastChild.onclick = async () => { if (confirm('Supprimer « ' + t.name + ' » ?')) { await DB.del('tracks', t.id); rmDir('Trajets/' + safe(t.name)); draw(); } };
+    d.querySelector('.ed').onclick = () => { $('#fList').classList.remove('on'); editTrack(t); };
+    d.querySelector('.del').onclick = async () => { if (confirm('Supprimer « ' + t.name + ' » ?')) { await DB.del('tracks', t.id); rmDir('Trajets/' + safe(t.name)); draw(); } };
     $('#lTrk').append(d); });
 }
 $('#bList').onclick = () => $('#fList').classList.add('on');
@@ -346,7 +394,7 @@ async function exportAll() {
   if (tph.length) z.file('photos_trajets.geojson', JSON.stringify({type: 'FeatureCollection', features: tph}, null, 1));
   z.file('trajets.geojson', JSON.stringify({type: 'FeatureCollection', features: T.map(t => ({type: 'Feature',
     geometry: {type: 'LineString', coordinates: t.pts.map(q => [q[0], q[1]])},
-    properties: {name: t.name, date: t.t, mode: t.mode || 'auto', longueur_m: Math.round(len(t.pts)), nb_photos: (t.photos || []).length}}))}, null, 1));
+    properties: {name: t.name, note: t.note || '', date: t.t, mode: t.mode || 'auto', longueur_m: Math.round(len(t.pts)), nb_photos: (t.photos || []).length}}))}, null, 1));
   z.file('releve.kmz', await buildKmz(P, T));
   await deliver(await out.generateAsync({type: 'blob'}), 'releve_' + day() + '.zip', 'application/zip');
 }
@@ -394,7 +442,7 @@ async function saveTrackFiles(t) {
   try {
     const n = safe(t.name), d = 'Trajets/' + n + '/', ph = t.photos || [];
     for (let i = 0; i < ph.length; i++) await wr(d + n + '_' + (i + 1) + '.jpg', await b64(ph[i].blob));
-    const feats = [{type: 'Feature', geometry: {type: 'LineString', coordinates: t.pts.map(q => [q[0], q[1]])}, properties: {name: t.name, date: t.t, mode: t.mode, longueur_m: Math.round(len(t.pts))}}]
+    const feats = [{type: 'Feature', geometry: {type: 'LineString', coordinates: t.pts.map(q => [q[0], q[1]])}, properties: {name: t.name, note: t.note || '', date: t.t, mode: t.mode, longueur_m: Math.round(len(t.pts))}}]
       .concat(ph.map((h, i) => ({type: 'Feature', geometry: {type: 'Point', coordinates: [h.lng, h.lat]}, properties: {photo: n + '_' + (i + 1) + '.jpg', date: h.t}})));
     await wr(d + n + '.geojson', JSON.stringify({type: 'FeatureCollection', features: feats}, null, 1), 'utf8');
   } catch (e) { console.warn('Sauvegarde fichiers :', e); }
@@ -433,7 +481,7 @@ async function buildKmz(P, T) {
   });
   T.forEach(t => {
     let d = safe(t.name); if (used.has(d)) d += '_' + t.id; used.add(d);
-    tk.push(`<Placemark><name>${esc(t.name)}</name><styleUrl>#ln</styleUrl><description>${Math.round(len(t.pts))} m</description><LineString><tessellate>1</tessellate><coordinates>${t.pts.map(q => q[0] + ',' + q[1] + ',0').join(' ')}</coordinates></LineString></Placemark>`);
+    tk.push(`<Placemark><name>${esc(t.name)}</name><styleUrl>#ln</styleUrl><description>${Math.round(len(t.pts))} m${t.note ? ' — ' + esc(t.note) : ''}</description><LineString><tessellate>1</tessellate><coordinates>${t.pts.map(q => q[0] + ',' + q[1] + ',0').join(' ')}</coordinates></LineString></Placemark>`);
     (t.photos || []).forEach((h, i) => ph.push(`<Placemark><name>${esc(t.name)} - photo ${i + 1}</name><styleUrl>#pt</styleUrl><description><![CDATA[${img('files/trajets/' + d + '/' + d + '_' + (i + 1) + '.jpg', h.blob)}]]></description><Point><coordinates>${h.lng},${h.lat},0</coordinates></Point></Placemark>`));
   });
   const folder = (n, a) => a.length ? `<Folder><name>${n}</name>${a.join('')}</Folder>` : '';
