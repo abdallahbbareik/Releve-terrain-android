@@ -352,7 +352,8 @@ async function exportAll() {
 }
 
 const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
-const plugs = {}, P = n => plugs[n] || (plugs[n] = Capacitor.registerPlugin(n));
+// Appel direct du pont natif Capacitor (sans passer par registerPlugin, absent hors bundler)
+const P = n => new Proxy({}, {get: (_, m) => o => Capacitor.nativePromise(n, m, o || {})});
 const b64 = blob => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.onerror = ko; r.readAsDataURL(blob); });
 
 /* Sauvegarde automatique en fichiers : dossier Releve-Terrain (Documents, sinon dossier de l'application) */
