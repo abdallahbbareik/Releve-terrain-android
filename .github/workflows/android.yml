@@ -29,10 +29,12 @@ jobs:
           cp node_modules/leaflet/dist/leaflet.js node_modules/leaflet/dist/leaflet.css www/lib/
           cp -r node_modules/leaflet/dist/images www/lib/images
           cp node_modules/jszip/dist/jszip.min.js www/lib/
+          cp node_modules/leaflet-rotate/dist/leaflet-rotate.js www/lib/
           sed -i \
             -e 's#https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css#lib/leaflet.css#' \
             -e 's#https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js#lib/leaflet.js#' \
             -e 's#https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js#lib/jszip.min.js#' \
+            -e 's#https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.js#lib/leaflet-rotate.js#' \
             www/index.html
 
       - name: Créer le projet Android
