@@ -36,6 +36,7 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 #trkBar{position:absolute;left:8px;right:8px;bottom:80px;z-index:1000;display:flex;gap:8px}
 #trkBar[hidden]{display:none}
 #trkBar .btn{background:var(--bg);border-color:var(--acc)}
+#bNorth{position:absolute;top:88px;left:8px;z-index:1000;width:46px;height:46px;border-radius:50%;background:var(--bg);border:1px solid var(--acc);padding:0;display:flex;align-items:center;justify-content:center}
 #bGps{position:absolute;top:46px;left:8px;z-index:1000;background:var(--bg);color:var(--ink);border:1px solid var(--acc);border-radius:18px;padding:6px 12px;font:inherit;font-size:14px}
 .vide{color:var(--mut);padding:12px 0}
 </style>
@@ -43,6 +44,7 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 <body>
 <div id="map"></div>
 <div id="status"><span id="gps">GPS : recherche…</span><span id="rec" hidden></span></div>
+<button id="bNorth" aria-label="Nord"><svg id="nSvg" viewBox="0 0 40 40" width="38" height="38"><polygon points="20,3 28,22 12,22" fill="#e4572e"/><polygon points="20,37 28,22 12,22" fill="#f4f7f2"/><circle cx="20" cy="22" r="2.2" fill="#12352b"/></svg></button>
 <button id="bGps">📡 Activer le GPS</button>
 <div id="trkBar" hidden>
   <button class="btn" id="tPhoto">📷 Photo</button>
@@ -95,12 +97,14 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 
 <section class="sheet" id="fList">
   <h2>Relevé</h2>
+  <div class="vide" id="savInfo"></div>
   <h3>Points</h3><div id="lPts"></div>
   <h3>Trajets</h3><div id="lTrk"></div>
   <div class="row"><button class="btn p" id="lClose">Fermer</button></div>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 const $ = s => document.querySelector(s);
@@ -117,10 +121,12 @@ $('#custom').innerHTML = FIELDS.map(f => `<label for="f_${f.id}">${f.label}</lab
 /* ---------- Stockage local (IndexedDB) ---------- */
 const DB = (() => {
   const open = new Promise((ok, ko) => {
-    const r = indexedDB.open('releve', 1);
+    const r = indexedDB.open('releve', 2);
     r.onupgradeneeded = () => {
-      r.result.createObjectStore('points', {keyPath: 'name'});
-      r.result.createObjectStore('tracks', {keyPath: 'id', autoIncrement: true});
+      const d = r.result;
+      if (!d.objectStoreNames.contains('points')) d.createObjectStore('points', {keyPath: 'name'});
+      if (!d.objectStoreNames.contains('tracks')) d.createObjectStore('tracks', {keyPath: 'id', autoIncrement: true});
+      if (!d.objectStoreNames.contains('draft')) d.createObjectStore('draft');
     };
     r.onsuccess = () => ok(r.result); r.onerror = ko;
   });
@@ -128,12 +134,15 @@ const DB = (() => {
     return new Promise((ok, ko) => { const t = d.transaction(s, m), q = f(t.objectStore(s));
       t.oncomplete = () => ok(q.result); t.onerror = ko; }); };
   return { all: s => tx(s, 'readonly', o => o.getAll()),
-           put: (s, v) => tx(s, 'readwrite', o => o.put(v)),
+           get: (s, k) => tx(s, 'readonly', o => o.get(k)),
+           put: (s, v, k) => tx(s, 'readwrite', o => o.put(v, k)),
            del: (s, k) => tx(s, 'readwrite', o => o.delete(k)) };
 })();
 
 /* ---------- Carte ---------- */
-const map = L.map('map', {zoomControl: false}).setView([34.0, 9.0], 6);
+const map = L.map('map', {zoomControl: false, rotate: true, touchRotate: true, rotateControl: false, bearing: 0}).setView([34.0, 9.0], 6);
+map.on('rotate', () => { $('#nSvg').style.transform = 'rotate(' + (-map.getBearing()) + 'deg)'; });
+$('#bNorth').onclick = () => map.setBearing(0);  // rouge = nord ; toucher pour remettre le nord en haut
 const plan = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'});
 const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom: 19, attribution: 'Esri'});
 sat.addTo(map);
@@ -143,7 +152,7 @@ const layerPts = L.layerGroup().addTo(map), layerTrk = L.layerGroup().addTo(map)
 let me = null, meDot = null, first = true;
 
 /* ---------- GPS ---------- */
-let rec = null; // trajet en cours
+let rec = null, dirty = false; // trajet en cours
 let wid = null, gpsErr = 0;
 const onPos = p => {
   gpsErr = 0; $('#bGps').textContent = '🎯';
@@ -155,7 +164,7 @@ const onPos = p => {
   if (rec && rec.mode === 'auto' && me.acc < 50) {
     const last = rec.pts[rec.pts.length - 1];
     if (!last || map.distance([last[1], last[0]], [me.lat, me.lng]) > 3) {
-      rec.pts.push([me.lng, me.lat, Date.now()]);
+      rec.pts.push([me.lng, me.lat, Date.now()]); dirty = true;
       rec.line.setLatLngs(rec.pts.map(q => [q[1], q[0]]));
       recStatus();
     }
@@ -217,7 +226,8 @@ $('#pSave').onclick = async () => {
   for (const f of FIELDS) { fv[f.id] = $('#f_' + f.id).value.trim(); if (f.options && !fv[f.id]) return alert('Choisissez : ' + f.label + '.'); }
   if ((await DB.all('points')).some(p => p.name === name)) return alert('Ce nom existe déjà. Choisissez un autre nom.');
   await Promise.all(jobs);
-  await DB.put('points', {name, f: fv, note: $('#pNote').value.trim(), lat: target.lat, lng: target.lng, acc: target.acc, alt: target.alt ?? null, t: new Date().toISOString(), photos});
+  const pt = {name, f: fv, note: $('#pNote').value.trim(), lat: target.lat, lng: target.lng, acc: target.acc, alt: target.alt ?? null, t: new Date().toISOString(), photos};
+  await DB.put('points', pt); savePointFiles(pt);
   $('#fPoint').classList.remove('on'); draw();
 };
 
@@ -228,9 +238,10 @@ const recPos = () => {  // manuel : dernier point tracé ; automatique : positio
   return (rec.mode === 'manual' ? lv || gps : gps || lv) || map.getCenter();
 };
 const redraw = () => rec.line.setLatLngs(rec.pts.map(q => [q[1], q[0]]));
-function addVertex(ll) { rec.pts.push([ll.lng, ll.lat, Date.now()]); redraw(); recStatus(); }
+function addVertex(ll) { dirty = true; rec.pts.push([ll.lng, ll.lat, Date.now()]); redraw(); recStatus(); }
 $('#tUndo').onclick = () => { if (rec && rec.pts.length) { rec.pts.pop(); redraw(); recStatus(); } };
 function startTrack(mode) {
+  DB.del('draft', 'cur');
   $('#fMode').classList.remove('on');
   if (mode === 'auto' && !me) return alert('Position GPS non disponible.');
   rec = {mode, pts: [], photos: [], jobs: [], t0: new Date().toISOString(),
@@ -251,20 +262,35 @@ $('#tPoint').onclick = () => {
 $('#iTrk').onchange = e => {
   const f = e.target.files[0], r = rec; e.target.value = ''; if (!f || !r) return;
   const pos = recPos(), ph = {blob: f, lat: pos.lat, lng: pos.lng, t: new Date().toISOString()};
-  r.photos.push(ph);  // enregistrée tout de suite, réduite en arrière-plan
+  r.photos.push(ph); dirty = true;  // enregistrée tout de suite, réduite en arrière-plan
   L.circleMarker([pos.lat, pos.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(r.marks);
   recStatus();
-  r.jobs.push(shrink(f).then(b => { ph.blob = b; }));
+  r.jobs.push(shrink(f).then(b => { ph.blob = b; dirty = true; }));
 };
 async function stopTrack() {
   const r = rec; rec = null; map.removeLayer(r.line); map.removeLayer(r.marks);
   $('#bTrack').classList.remove('rec'); $('#tLbl').textContent = 'Trajet';
   $('#rec').hidden = true; $('#trkBar').hidden = true;
-  if (r.pts.length < 2) return alert('Trajet trop court, non enregistré.');
-  const def = 'Trajet ' + new Date().toLocaleString('fr-FR');
+  if (r.pts.length < 2) { DB.del('draft', 'cur'); return alert('Trajet trop court, non enregistré.'); }
+  await finishTrack(r);
+}
+async function finishTrack(r) {
+  const def = 'Trajet ' + new Date(r.t0).toLocaleString('fr-FR');
   const n = (prompt('Nom du trajet :', def) || '').trim();
-  await Promise.all(r.jobs);
-  await DB.put('tracks', {name: n || def, t: r.t0, mode: r.mode, pts: r.pts, photos: r.photos}); draw();
+  await Promise.all(r.jobs || []);
+  const t = {name: n || def, t: r.t0, mode: r.mode, pts: r.pts, photos: r.photos};
+  t.id = await DB.put('tracks', t);
+  await DB.del('draft', 'cur'); draw(); saveTrackFiles(t);
+}
+/* Sauvegarde automatique du trajet en cours : retrouvé si l'application est fermée */
+const saveDraft = () => { if (rec && dirty) { dirty = false; DB.put('draft', {mode: rec.mode, pts: rec.pts, photos: rec.photos, t0: rec.t0}, 'cur').catch(() => {}); } };
+setInterval(saveDraft, 4000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveDraft(); });
+async function recoverDraft() {
+  const d = await DB.get('draft', 'cur'); if (!d) return;
+  if (d.pts.length < 2) return DB.del('draft', 'cur');
+  if (!confirm('Un trajet interrompu a été retrouvé (' + d.pts.length + ' points, ' + d.photos.length + ' photo(s)). Le récupérer ?')) return DB.del('draft', 'cur');
+  await finishTrack(d);
 }
 
 /* ---------- Affichage ---------- */
@@ -281,14 +307,14 @@ async function draw() {
     d.innerHTML = `<div><b></b><small>${p.f && p.f.type ? p.f.type + ' · ' : ''}${p.photos.length} photo(s) · ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</small></div><button>🗑</button>`;
     d.querySelector('b').textContent = p.name;
     d.firstChild.onclick = () => { $('#fList').classList.remove('on'); map.setView([p.lat, p.lng], 19); };
-    d.lastChild.onclick = async () => { if (confirm('Supprimer « ' + p.name + ' » ?')) { await DB.del('points', p.name); draw(); } };
+    d.lastChild.onclick = async () => { if (confirm('Supprimer « ' + p.name + ' » ?')) { await DB.del('points', p.name); rmDir('Points/' + safe(p.name)); draw(); } };
     $('#lPts').append(d); });
   $('#lTrk').innerHTML = T.length ? '' : '<div class="vide">Aucun trajet. Touchez ⏺ pour en enregistrer un.</div>';
   T.forEach(t => { const d = document.createElement('div'); d.className = 'item';
     d.innerHTML = `<div><b></b><small>${t.mode === 'manual' ? 'Manuel' : 'GPS'} · ${Math.round(len(t.pts))} m · ${(t.photos || []).length} photo(s)</small></div><button>🗑</button>`;
     d.querySelector('b').textContent = t.name;
     d.firstChild.onclick = () => { $('#fList').classList.remove('on'); map.fitBounds(t.pts.map(q => [q[1], q[0]])); };
-    d.lastChild.onclick = async () => { if (confirm('Supprimer « ' + t.name + ' » ?')) { await DB.del('tracks', t.id); draw(); } };
+    d.lastChild.onclick = async () => { if (confirm('Supprimer « ' + t.name + ' » ?')) { await DB.del('tracks', t.id); rmDir('Trajets/' + safe(t.name)); draw(); } };
     $('#lTrk').append(d); });
 }
 $('#bList').onclick = () => $('#fList').classList.add('on');
@@ -325,7 +351,69 @@ async function exportAll() {
   await deliver(await out.generateAsync({type: 'blob'}), 'releve_' + day() + '.zip', 'application/zip');
 }
 
+const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+const plugs = {}, P = n => plugs[n] || (plugs[n] = Capacitor.registerPlugin(n));
+const b64 = blob => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.onerror = ko; r.readAsDataURL(blob); });
+
+/* Sauvegarde automatique en fichiers : dossier Releve-Terrain (Documents, sinon dossier de l'application) */
+let base = null;
+async function baseDir() {
+  if (base || !NATIVE) return base;
+  try { await P('Filesystem').requestPermissions(); } catch (e) {}
+  for (const d of ['DOCUMENTS', 'EXTERNAL']) {
+    try {
+      const t = 'Releve-Terrain/.test' + Date.now();
+      await P('Filesystem').writeFile({path: t, data: 'ok', directory: d, encoding: 'utf8', recursive: true});
+      base = d;
+      try { await P('Filesystem').deleteFile({path: t, directory: d}); } catch (e) {}
+      return d;
+    } catch (e) {}
+  }
+  return null;
+}
+const baseLabel = () => base === 'DOCUMENTS' ? 'Documents/Releve-Terrain' : 'Android/data/tn.releve.terrain/files/Releve-Terrain';
+async function wr(path, data, enc) {
+  const d = await baseDir(); if (!d) return;
+  await P('Filesystem').writeFile({path: 'Releve-Terrain/' + path, data, directory: d, recursive: true, ...(enc ? {encoding: enc} : {})});
+}
+async function rmDir(path) {
+  const d = await baseDir(); if (!d) return;
+  try { await P('Filesystem').rmdir({path: 'Releve-Terrain/' + path, directory: d, recursive: true}); } catch (e) {}
+}
+async function savePointFiles(p) {
+  if (!NATIVE) return;
+  try {
+    const n = safe(p.name), d = 'Points/' + n + '/';
+    for (let i = 0; i < p.photos.length; i++) await wr(d + n + '_' + (i + 1) + '.jpg', await b64(p.photos[i]));
+    await wr(d + n + '.json', JSON.stringify({name: p.name, ...(p.f || {}), note: p.note, lat: p.lat, lng: p.lng, precision_m: p.acc, date: p.t, nb_photos: p.photos.length}, null, 1), 'utf8');
+  } catch (e) { console.warn('Sauvegarde fichiers :', e); }
+}
+async function saveTrackFiles(t) {
+  if (!NATIVE) return;
+  try {
+    const n = safe(t.name), d = 'Trajets/' + n + '/', ph = t.photos || [];
+    for (let i = 0; i < ph.length; i++) await wr(d + n + '_' + (i + 1) + '.jpg', await b64(ph[i].blob));
+    const feats = [{type: 'Feature', geometry: {type: 'LineString', coordinates: t.pts.map(q => [q[0], q[1]])}, properties: {name: t.name, date: t.t, mode: t.mode, longueur_m: Math.round(len(t.pts))}}]
+      .concat(ph.map((h, i) => ({type: 'Feature', geometry: {type: 'Point', coordinates: [h.lng, h.lat]}, properties: {photo: n + '_' + (i + 1) + '.jpg', date: h.t}})));
+    await wr(d + n + '.geojson', JSON.stringify({type: 'FeatureCollection', features: feats}, null, 1), 'utf8');
+  } catch (e) { console.warn('Sauvegarde fichiers :', e); }
+}
+async function showSav() {
+  const el = $('#savInfo');
+  if (!NATIVE) { el.textContent = 'Données conservées dans le navigateur de cet appareil.'; return; }
+  await baseDir();
+  el.textContent = base ? '💾 Sauvegarde automatique : ' + baseLabel() : "💾 Sauvegarde en fichiers indisponible (données conservées dans l'application).";
+}
+
 async function deliver(blob, fn, type) {
+  if (NATIVE) {  // Android : copie dans Releve-Terrain/Exports, puis menu de partage
+    const data = await b64(blob);
+    const w = await P('Filesystem').writeFile({path: fn, data, directory: 'CACHE'});
+    wr('Exports/' + fn, data).catch(e => console.warn(e));
+    try { await P('Share').share({title: fn, url: w.uri, dialogTitle: 'Exporter le relevé'}); }
+    catch (e) { if (!/cancel/i.test(String(e && e.message))) throw e; }
+    return;
+  }
   const file = new File([blob], fn, {type});
   if (navigator.canShare && navigator.canShare({files: [file]})) { try { await navigator.share({files: [file]}); return; } catch (e) { if (e.name === 'AbortError') return; } }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn; a.click();
@@ -362,8 +450,8 @@ $('#bExp').onclick = async () => {
   b.disabled = false; b.querySelector('b').textContent = '⬇';
 };
 
-draw();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+draw(); recoverDraft(); showSav();
+if ('serviceWorker' in navigator && !NATIVE) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>
