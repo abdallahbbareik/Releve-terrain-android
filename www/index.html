@@ -3,30 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#12352b">
+<meta name="theme-color" content="#b1b1b5">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg">
 <title>Relevé terrain</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-:root{--bg:#12352b;--ink:#f4f7f2;--acc:#f2c230;--mut:#9db8ad;--line:#2a5646}
+:root{--bg:#b1b1b5;--ink:#062a3d;--acc:#0b5a8a;--mut:#0d4f73;--line:#1e1e21}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{height:100%;margin:0;font:16px/1.4 system-ui,sans-serif;color:var(--ink);background:var(--bg)}
 #map{position:absolute;inset:0 0 72px 0}
 #bar{position:absolute;left:0;right:0;bottom:0;height:72px;padding-bottom:env(safe-area-inset-bottom);display:flex;background:var(--bg);border-top:2px solid var(--acc);z-index:1000}
 #bar button{flex:1;border:0;background:none;color:var(--ink);font:inherit;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
 #bar button b{font-size:22px;font-weight:400}
-#bar button.rec{color:var(--acc)}
+#bar button.rec{background:var(--acc);color:#fff}
 #status{position:absolute;top:8px;left:8px;right:8px;z-index:1000;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
 #status span{background:var(--bg);padding:4px 10px;border-radius:14px;font-size:13px}
 .sheet{position:fixed;inset:0;z-index:2000;background:var(--bg);overflow:auto;padding:16px;padding-top:calc(16px + env(safe-area-inset-top));display:none}
 .sheet.on{display:block}
 .sheet h2{margin:0 0 12px;font-size:20px}
 label{display:block;margin:12px 0 4px;color:var(--mut);font-size:14px}
-input[type=text],textarea,select{width:100%;padding:12px;border-radius:6px;border:1px solid var(--line);background:#0c2620;color:var(--ink);font:inherit}
+input[type=text],textarea,select{width:100%;padding:12px;border-radius:6px;border:1px solid var(--line);background:#eaf8ff;color:var(--ink);font:inherit}
 .row{display:flex;gap:8px;margin-top:12px}
 .btn{flex:1;padding:12px;border-radius:6px;border:1px solid var(--line);background:none;color:var(--ink);font:inherit;text-align:center}
-.btn.p{background:var(--acc);color:#12352b;border-color:var(--acc);font-weight:600}
+.btn.pic{background:#4fc3f7;color:var(--ink);border-color:var(--line)}
+.btn.p{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600}
 #thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 #thumbs img{width:72px;height:72px;object-fit:cover;border-radius:4px}
 .item{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
@@ -40,7 +42,8 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 .bar2{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--acc);border-radius:8px;padding:8px}
 .bar2 span{flex:1;font-size:14px}
 .bar2 .btn{flex:none;padding:8px 12px}
-.vtx{background:#f2c230;border:3px solid #12352b;border-radius:50%}
+.leaflet-popup-content a{display:inline-block;padding:10px 6px;font-size:16px}
+.vtx{background:#4fc3f7;border:3px solid #062a3d;border-radius:50%}
 #trkBar .btn{background:var(--bg);border-color:var(--acc)}
 #thumbs .th{position:relative}
 #thumbs .th b{position:absolute;top:-6px;right:-6px;width:24px;height:24px;border-radius:50%;background:#e4572e;color:#fff;font:700 14px/24px sans-serif;text-align:center}
@@ -53,11 +56,12 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 <body>
 <div id="map"></div>
 <div id="status"><span id="gps">GPS : recherche…</span><span id="rec" hidden></span></div>
-<button id="bNorth" aria-label="Nord"><svg id="nSvg" viewBox="0 0 40 40" width="38" height="38"><polygon points="20,3 28,22 12,22" fill="#e4572e"/><polygon points="20,37 28,22 12,22" fill="#f4f7f2"/><circle cx="20" cy="22" r="2.2" fill="#12352b"/></svg></button>
+<button id="bNorth" aria-label="Nord"><svg id="nSvg" viewBox="0 0 40 40" width="38" height="38"><polygon points="20,3 28,22 12,22" fill="#e4572e"/><polygon points="20,37 28,22 12,22" fill="#f4f7f2"/><circle cx="20" cy="22" r="2.2" fill="#062a3d"/></svg></button>
 <button id="bGps">📡 Activer le GPS</button>
 <div id="stack">
   <div class="bar2" id="ptBar" hidden><span id="ptMsg"></span><button class="btn" id="ptGps">📍 Ma position</button><button class="btn" id="ptOff">✕</button></div>
   <div class="bar2" id="geoBar" hidden><span>Glisse un sommet · touche-le pour le supprimer · touche la carte pour prolonger</span><button class="btn p" id="gOk">✔</button><button class="btn" id="gNo">✕</button></div>
+  <div class="bar2" id="mvBar" hidden><span>Glisse le point à sa nouvelle position</span><button class="btn p" id="mOk">✔</button><button class="btn" id="mNo">✕</button></div>
   <div id="trkBar" hidden>
     <button class="btn" id="tPhoto">📷 Photo</button>
     <button class="btn" id="tPoint">📍 Point</button>
@@ -80,14 +84,14 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
   <label for="pNote">Remarque</label>
   <textarea id="pNote" rows="3"></textarea>
   <div class="row">
-    <button class="btn" id="bCam">📷 Prendre une photo</button>
-    <button class="btn" id="bGal">🖼 Galerie</button>
+    <button class="btn pic" id="bCam">📷 Prendre une photo</button>
+    <button class="btn pic" id="bGal">🖼 Galerie</button>
   </div>
   <input type="file" id="iCam" accept="image/*" capture="environment" hidden>
   <input type="file" id="iGal" accept="image/*" multiple hidden>
   <div id="thumbs"></div>
   <div class="vide" id="pPos"></div>
-  <div class="row" id="pLoc" hidden><button class="btn" id="pGps">📍 Ma position</button><button class="btn" id="pMap">🗺 Sur la carte</button></div>
+  <div class="row" id="pLoc" hidden><button class="btn" id="pMap">🗺 Déplacer sur la carte (glisser)</button></div>
   <div class="row" id="pTrk" hidden><button class="btn" id="pShape">✏️ Modifier le tracé sur la carte</button></div>
   <div class="row">
     <button class="btn" id="pCancel">Annuler</button>
@@ -164,6 +168,8 @@ const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Wo
 sat.addTo(map);
 L.control.layers({'Satellite': sat, 'Plan': plan}, null, {position: 'topright'}).addTo(map);
 L.control.scale({imperial: false}).addTo(map);
+const PIN_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAARdklEQVR42u2df5BeVXnHP885991fyWYTkDAgYAethB/GmN0NBqkLis4U6tTKvhER6w/QqVptRWeoo5IEp1PbjthSW/uPdCq2FZbBEVQsasOqIJAswfzYJKCJpBRiQn5sNnl/3XPO0z/u3TebRWPed+99dzfjmdlJJtn33vs+3/N8v895znOeK8yCoSAMYBnGC2j933vpocAyHK9DZClwPnAOykKE+U4pbCkrTokNHEE5ZITnVNkphk1W2Fgr8VTfTsYm3+vhAewVU+41U0Nm3PBFjAzh6//WxyUIbwV5I0ovhnMwxz5QN5mCV9hSVryCFTAc+xOgqhCU5wyMGPhRCDy0bDtb6vcqYhkizCQQMhsMrytZjOMdiLwT5Y1EGBQIdaP79Gll0jPLBABO6/AA6CSD2oJAu4EIOOwJBn4kyt2hwH3LNrF3poFoOQBaxNYN38t5WPkI8AEsZxDqRnepuc2JnnEyAPKbwVY0Na4QdRmIBEqefSrcGSn/cskou6c+2ykHgKbMIBC0l5dh+TTIjVh68ECoz3Jzss91MgC89DEIqhAZ7DwDJc8YwlfjmL/pe5oXV6fPuTaZCqcGAMfN+n7ei8htWM7DpbNdsM08SxMAHOcZongjRN0WSoHdTrl1+Sj/nv6/FfL3htwB0AEiGcaldPMVDFenVNO04bMAYApF+TZD1GGgGvjuIeXDfzDK7nUDRFcO4/K0j8lTaLWIlWGcruAarDyG4WocDk34eKajsHQGighRTdFxh2s3XN0jPLZhCddcOYy7p4jVHJ9T8jI+IAJB+83nMHpbGtX4dNZnMrLwgKkjKL7dYCOBSuDW5aN8PtUvzSNKMjkZPxHbfvkykd5GIKCELI2fGyUItqaEciAssNz25MV8WVJBzsMTJHPjr0YYRfilfJ2I64inz/Wt9ICpIr0wIjrs+cayUW6YWJVk6QkmU+MXMbKWwLPyNQpchyOeLVzfjDYgRIcccY/luicv5GsCYYiTD5NbS0EDSaipfXIHluuJiYECc30IhYOOeGHE9Rsu5I5V4NcNZEelmQAwKdS8hQIfw50ixp8EwpgjXhTxsceXcMuVw7h1A0SzQgMmFlnayxVEso6Ag3w4v5Ua8Os0wYIvGKLxmCtX7uDhe8CumuZiTab5UIkHXc7pVOVJhJcT0DSdwKkEQPp9Q7sgTvk/bWP5655i/5pppi2mZ6hiEutTla8QcU4a5xtO0SFgqgHfbTnHV/mKQFhTnB72ZtrUs4JrsFybhpsRp/gQIRpzuG7LtRuXcI0M4e8pNi/K0qQrJnn5pXTSLj/DcD4BzTO1MdkCEz9ehS3lgAsgKGj60wIq6hCkGthpC7z2tZsoN7s+aM5gA1iBQBsfJ+KVeHyuxhcBG4Ex4AKUPIw5OBTDmIcjHsoBcZr8jrXJZ3KkokrAL4x4pXN8XCA83GRoKk3OfuhlASI7MCxGc5r9IolBaw5KgCWweJHjnFcqZ73C+8757dv3j+NKR6r64vNWX9gtYf/hSBxGukALFkLIyytClAjyXq1wQe9ODqcGbehmUVOzfxinhpuIOJM42wTbMd+04B2MBeWs02PeMeh5yyAsWW7DgtOidJfRtD+/j8i5duIajO33YefWqvvJ94gf+a7VvYcKZh6i1iRAZPyEceIFZx7u4CaBL64bIKLB9LU0Ofs7MbIdwzm5cL+1cMTB/K6Y934q5p1/HrHojMJxzxs83nl27fwlzgfEGsQWkPYOgrHKr/43jr9zl4uH/rVAqVrQeRZ85vsroS3RgufoYknvCOVGvcA0wf2KcBWWc/GE7I0fwUEH/W+ocPfGwJ+t7WTRGW14LwR/jE6MTX7X2oSmENTFhCNjMHZApOe0trYbP9PZ8c/fC/Ka5RUO++QzGXtBNRDmW86VMlcJaKNa0JjxFk8gK/XMYPbGj5V331Tmzh9FnPfqdrwTVFND/xZxFUmBsWgcowdflOjcV7V33n5fFP1RsayHvUrGIAioERS4AWDf4sZsIo3Qj4DqpZyJl2cwdKfim024EVk44JT3f7TCLV9uQ9Wi4YSz1vvArp27cM4jvwmY4BEbwbwFvvLFm2vxff/RYXqsaEZ0pKCRIF4ZLxh+f+kWfjVhq2w9YMK1PFcQ0Z1WMUhmnH/IwTVvS4wfvK3TTAZirt7DkTHb/om/b4sGrqzouAdrsvIAcQE/39IdK1cANEJDTTyFXJGsejKiH0l2wjn37Bq33WVRtelObYZMbdAQkFrVdtz8JctZi2tS1eTeWdEQqKYA5KMBw3hdjUG4nFAvmsrAOAKVELjlHz3zetoIPhXVrOXSoNUy8rKz2tpv+owPNQ1ZhQ8qmJoiwOUK5orhk8+QmpPkOSOgPMgrgAvS3J9kQQ8cdbCiP+ZNg4nxbY7pJBvB+CGigT9pM0tfE0spZAW2VAOIcsHPXs0rJInVTHYecCzjdxGWAkn6VbLwXWKUd92sgG1JHicEpL3dFt72fvUOzYLqBCRA6LIUnOGiKTbLAIC96cWUJQigGZTtiSQphpef7rj8muxE9ySoiPJRot4rrT2zx0nNZ6I3ooRIAMMSgIf3ZgnAsdv8XqaGqACvfYNnXrclhFwTaJOB17iGnHamNUt6vVbJUoxBachGJ3fnY4uLs9O/SSaP64ClKwE1aEtqYVMeUsRGxl6wLLltBsAriE++1tkA+4azXAcM1S92WoZWAIty3gVwXNl/C4aAaEBefj5q0Cy0RxJckdRGxYwXYhMX68os+aCabN0vOK2QlU81LMbzewpiyWZJc6x8rmuKzaYPwKRldaHRFMYJITUobW0zcDwoiSQkalMElQw8YCJTrJLYKNNUxKSiA9cIur/VBgGhWs7qig2iL2itCgHRbEJRTaMhN8VmmVDQRBhayYwqxCRwHtwbtxwBBTEGPXwgVp8d/6VVyRWANZkCsLp+h0rGhhB+sXVGDimqGMLup0U0PfqXgaQlxFYHIMMwdLTuAfsyoyDVZFPxZ48IiM8l/3OC/JO6mvfbR0QsZBQFqZFJNsplJWzYlRkFaYAOgc1PWPbv9YihJWsBVaStA92z24cdm6y0AyEbD0xPIe7KbyWs+myWhqAQwYtHI35wT5I9DC0AIHho78I98qDXg+VICzYz/Umv8mzDoDWwEt6RpuGySdqE1Av+83aLi13iBZrv7I8KhPGDrvbtf7Mmw9mvgq0qiLIjj5XwxNTcSmAslS3NhIY6LezYVeDuO2KMSWZoXsM76F5I/MCdse58rqAdNhPam9iWrHjGOpWt6Uo4ZAZAmt8WWc9+YEdmGdEJL+i2wj+tLvDcz6vYKB8QvMPM78E9s6ka33VHwcwzkhXlSVKeAvD0RdvZn++esOqP009pVrSABUpHIz55LVRLMcZmC4L3mPYuQvlIXP3rj0C5HGlG0U9qCS0kAPwY8toTntABw3fSuZ9d3BgCzItg86Z2/vLtDleL65Vx0x3OYTq7COri8poPOH1mRztd2VbKpVuSIHynEf5vzIgTOuB5nMALGAxZ9lPwHhYW4OHvd/KhN3sO7KnV6agZb0g/Zxaejj+4t1b+1Cofnni0k24LPkPjg7YJpuzZE0U83gj/NwSAgOoAkYxQQvVb2Ax1YNJsZWEBnvhJB9f1wvD9ZYz1GJvQhXccq47Tl1JZCOAdooqZtwDpXuhrw/eXSx+9Gt38ZEdi/Gz1RRTfmVjxW8s2cVSLafVg5h5wfDh6Jz6no0jeQXcELz7fxkf/uI1PvL3Gpp9WEPFJifpEddyk5kEiSKGAdM1Hek5H2zu82/x4pfLZ99Sqn/tgmxzc16bzTB61oSCYckCN4asAQ0NN5I8adDkDKP3yGIZ+fE4n4CcOYox7KOB53etj3nStsnxAOO9Vhu5F1gO7du3GVSpI6YgPe3YHv3W9+kcfFLd1Y0EcVuYbNL+DG77LYI561vdu4/VrQBo9L9Y4ABNHUlcwiJEhXE7l6RPDpjX+pQAx0IEPpy0MZtFi4zq73eh4FXdkPJLxA0EPjRutYE0B6BRU8l1XqOK7LfZwoNg/yr3NdFdp9oiSoYiwS0awLM3NC44jS5OksINPTsm4BJctlQQXEwFWUGOO6UG+w3cYTMmzue8Slq8ZQps5LdkchxcRGcIjujabZO5JhqrepVlUA50W7bJop4F2g1pJqMb7luSUVCESxBjWyhC+2dOSTQEgQ3gtYmU938TxEBG23livFWNihk/8aGjJ4byp1DPueKh3K/fdM41ec9OKYpI9CP04gVp9x+AUH2neh4pSw/IXgDDU/PWaBkCG8BQxsoEdqNzaci+YOQT8fIuteFb3bWG7FjHTaVcg0/aAtP+n9stDWN6Ca92B7Za3KlDcgqR/0Pf7Rnlrelg9TMfzJQOXTNYFl3EWsWxEOCO3Y6szCICmB/JU2RcHlvVuZ0+6WpmW4k/bSAKBIkYe5XnQ6ydpgZ46rIPa9BBGDO/q284LQ0WMZJALy6Y4fgivA0Synh/i9JOnmh5IGvWUPJ/sG+V/1g0Qrcqow25mNCHDuDRZ9yVq3EWBKG1BPLdnv+J6IqJDnq+t2M4/ZN1LNPumfUUMeylQkkewLM8zVZG3Bqji51lsJTBy6CiX73uWuEi2Tb4zf+70OFPQPs7HyHpgUV6inHPXxFBIVvkHyjH9r3+aXRPfLdMMS+Z8CUGLWNnATlTfnaYqphWqzZDohkiQiuPdqfGt5NDQO5dQcZIofw+nf0VENJdEORXdqOS55dId/Pe6AaK8GnnnFqtPEuW/xek35oooT4jumOO/+rfxd3k38JacXTnppPttOjDyUwxL8dmJctYaMEl0N/lOVvaOUCGnntG5e0CKblIzP0IJo4MohzB1TZhtvB8KBokDhyrKYN8IpcnfYU4CACBrCTpAJI/zDEH/NN1Hnm2irDaJekw58J6V23gm5f3cJ0pLasLrerCBB3D6uVknyqnoHvV89tLtfLsVL25oiQa8RA8m2p31y71E0291mckbNFLRPey4t3cbxdT4vlUeKq2daKkof595xPIYhoumI8rTBUAV32WxVWW0oFx68SilvEV3RijoOFEeReRRxlNRHp9BUQ6FpNHS4QoMXjLKkaEGimrnJADHLdIeZxtB35d5iePJf/HQZjBVz/tWbmXbugGiVbRel2akz/MkUb4Pp59PRbllizRVXLclOuK5rW8739QWiu6sAABIGkAlINyK4/5WRUb19LLj/v5trE57fc5YRDbTL/NMJkAv3Vh5AuHVjYhyoyKsiu+02Frgad/JigdGGIfWvTVvdnkA9e1MkRHG8DqIcjQVZc0BbI0ECYGjZc9g3whjFzdRy3lKAXCcKI+wmaA3YjB5UJFJSwnLyo2X7WDzTInurANgiijfjeMLWWdOVXE9ieh+YcU27l43g6I7qzTgBCvl72L5w99WY3RSr7NNa3nGPQ/2jnL1ugGi2fI27VnjAfVF2jBBQbB6A56dWKLpnMJRCJ2G6KhnZxVuUJCHh2f2DdqzFoBJomzkMQ6gOjipO4s2YXyNkhVeOVYGLxvlwBCYtbMsFT7rXrhTF+UNbCToB7HNibJJQk5TDnxoxTY2zhbRnfUATBHlr+P09kZFedK24u0rtvH12SS6s1aEf60oFzEMEUgKf6+aWmP060Q4KL4nwo57frB8lLdOXENmaVXGrH3nl4DWuzXGej2eZ7HYE4myKqHTYEuBZ6XG9QBrhlqbXj5lADhOlJ9iH0FXAbXf1Lk9XelqgFpJWbX85+wbKs4+0Z1TAExZKT+B1w+nXvASMZV0c6UU+PBlozyRZQHt7wbJ8VgAXSF36EpR7ZPY9Yk+dTG6/kLiX7wG3XAhd0z+3bkw5syLluuiDPBL+SGWgTjGby0rnQZ7NDD8i4t5cxGYzaI7ZwFIQUhP6XMmIiMKZ28rKXHg+Sr0Xjpaf39LmCvfaU69+bQuyuvZg+qgDzgUdyQweOkoe7SYffXy78YJ9ODwcj49egmfnmu8P3n8PxqZwJEEbJMlAAAAAElFTkSuQmCC';
+const PIN = L.icon({iconUrl: PIN_SRC, iconSize: [38, 38], iconAnchor: [19, 38], tooltipAnchor: [0, -34]});  // la pointe marque la position
 const layerPts = L.layerGroup().addTo(map), layerTrk = L.layerGroup().addTo(map);
 let me = null, meDot = null, first = true;
 
@@ -248,7 +254,7 @@ function openForm(o) {
 function newPoint(pos) {
   if (!pos) return alert('Position GPS non disponible. Touchez la carte pour placer le point à la main.');
   editing = null; target = pos; items = [];
-  openForm({title: 'Nouveau point'}); $('#pName').focus();
+  openForm({title: 'Nouveau point', gps: true}); $('#pName').focus();
 }
 function editPoint(p) {
   editing = {kind: 'point', rec: p}; target = {lat: p.lat, lng: p.lng, acc: p.acc, alt: p.alt};
@@ -259,24 +265,40 @@ function editTrack(t) {
   editing = {kind: 'track', rec: t}; items = (t.photos || []).map(h => ({b: h.blob, h}));
   openForm({title: 'Modifier le trajet', name: t.name, note: t.note, track: true});
 }
-let mapMode = null, geo = null;  // mapMode : 'point' (poser un point) | 'pick' (choisir une position)
-const busy = () => mapMode || geo || (rec && rec.mode === 'manual');
+let mapMode = null, geo = null, mv = null, pend = null;  // mapMode : 'point' = poser un point (avec confirmation)
+const busy = () => mapMode || geo || mv || (rec && rec.mode === 'manual');
 function setMode(m) {
   mapMode = m; $('#bPoint').classList.toggle('rec', m === 'point'); $('#ptBar').hidden = !m;
-  $('#ptMsg').textContent = m === 'pick' ? 'Touchez la carte pour la nouvelle position' : 'Touchez la carte pour placer le point';
-  $('#ptGps').hidden = m === 'pick';
+  $('#ptMsg').textContent = "Touchez la carte à l'emplacement du point"; if (!m) map.closePopup();
 }
-$('#bPoint').onclick = () => setMode(mapMode === 'point' ? null : 'point');
+const editBusy = () => { if (geo || mv) { alert("Terminez d'abord la modification en cours (✔ ou ✕)."); return true; } };
+$('#bPoint').onclick = () => { if (editBusy()) return; setMode(mapMode === 'point' ? null : 'point'); };
 $('#ptGps').onclick = () => { setMode(null); newPoint(me); };
-$('#ptOff').onclick = () => { const was = mapMode; setMode(null); if (was === 'pick') $('#fPoint').classList.add('on'); };
+$('#ptOff').onclick = () => setMode(null);
 map.on('click', e => {
   const ll = e.latlng;
+  if (mv) return;
   if (geo) { geo.pts.push([ll.lng, ll.lat, Date.now()]); return drawGeo(); }
-  if (mapMode === 'pick') { target = {lat: ll.lat, lng: ll.lng, acc: null}; setMode(null); showPos(); return $('#fPoint').classList.add('on'); }
-  if (mapMode === 'point') { setMode(null); return newPoint({lat: ll.lat, lng: ll.lng, acc: null}); }
+  if (mapMode === 'point') {  // confirmation de la position avant l'ajout
+    pend = ll;
+    return L.popup({closeButton: false}).setLatLng(ll)
+      .setContent('<div style="text-align:center">' + ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6) + '<br><a href="#" id="hand">✔ Créer un point ici</a></div>').openOn(map);
+  }
   if (rec && rec.mode === 'manual') addVertex(ll);
 });
-$('#pMap').onclick = () => { $('#fPoint').classList.remove('on'); setMode('pick'); };
+document.addEventListener('click', e => {
+  if (e.target.id === 'hand') { e.preventDefault(); map.closePopup(); setMode(null); newPoint({lat: pend.lat, lng: pend.lng, acc: null}); }
+});
+
+/* Déplacer un point en le glissant sur la carte */
+$('#pMap').onclick = () => {
+  $('#fPoint').classList.remove('on'); map.removeLayer(layerPts);
+  mv = {m: L.marker([target.lat, target.lng], {draggable: true, icon: PIN, zIndexOffset: 1000}).addTo(map)};
+  map.setView([target.lat, target.lng], Math.max(map.getZoom(), 18)); $('#mvBar').hidden = false;
+};
+function endMv() { map.removeLayer(mv.m); mv = null; $('#mvBar').hidden = true; layerPts.addTo(map); $('#fPoint').classList.add('on'); }
+$('#mOk').onclick = () => { const l = mv.m.getLatLng(); target = {lat: l.lat, lng: l.lng, acc: null}; endMv(); showPos(); };
+$('#mNo').onclick = endMv;
 
 /* Modification du tracé : sommets déplaçables, suppression, prolongement */
 function drawGeo() {
@@ -291,16 +313,12 @@ function endGeo() { map.removeLayer(geo.line); map.removeLayer(geo.marks); geo =
 $('#pShape').onclick = () => {
   const pts = (editing.pts || editing.rec.pts).map(q => q.slice());
   $('#fPoint').classList.remove('on'); map.removeLayer(layerTrk);
-  geo = {pts, line: L.polyline([], {color: '#f2c230', weight: 5, interactive: false}).addTo(map), marks: L.layerGroup().addTo(map)};
+  geo = {pts, line: L.polyline([], {color: '#4fc3f7', weight: 5, interactive: false}).addTo(map), marks: L.layerGroup().addTo(map)};
   drawGeo(); map.fitBounds(pts.map(q => [q[1], q[0]]), {padding: [40, 40]}); $('#geoBar').hidden = false;
 };
 $('#gOk').onclick = () => { editing.pts = geo.pts; endGeo(); showPos(); };
 $('#gNo').onclick = endGeo;
 $('#pCancel').onclick = () => { $('#fPoint').classList.remove('on'); editing = null; };
-$('#pGps').onclick = () => {
-  if (!me) return alert('Position GPS non disponible.');
-  target = {lat: me.lat, lng: me.lng, acc: me.acc, alt: me.alt}; showPos();
-};
 $('#pSave').onclick = async () => {
   const name = $('#pName').value.trim();
   if (!name) return alert('Saisissez un nom.');
@@ -341,12 +359,17 @@ function startTrack(mode) {
   $('#fMode').classList.remove('on');
   if (mode === 'auto' && !me) return alert('Position GPS non disponible.');
   rec = {mode, pts: [], photos: [], jobs: [], t0: new Date().toISOString(),
-         line: L.polyline([], {color: '#f2c230', weight: 5}).addTo(map), marks: L.layerGroup().addTo(map)};
+         line: L.polyline([], {color: '#4fc3f7', weight: 5}).addTo(map), marks: L.layerGroup().addTo(map)};
   $('#bTrack').classList.add('rec'); $('#tLbl').textContent = 'Arrêter';
   $('#rec').hidden = false; $('#trkBar').hidden = false; $('#tUndo').hidden = mode !== 'manual';
   recStatus();
 }
-$('#bTrack').onclick = () => rec ? stopTrack() : $('#fMode').classList.add('on');
+$('#bTrack').onclick = () => {
+  if (rec) return stopTrack();
+  if (editBusy()) return;
+  setMode(null);  // un seul événement à la fois : le mode « point » est désélectionné
+  $('#fMode').classList.add('on');
+};
 $('#mAuto').onclick = () => startTrack('auto'); $('#mMan').onclick = () => startTrack('manual');
 $('#mCancel').onclick = () => $('#fMode').classList.remove('on');
 $('#tPhoto').onclick = () => $('#iTrk').click();
@@ -393,7 +416,7 @@ async function recoverDraft() {
 async function draw() {
   layerPts.clearLayers(); layerTrk.clearLayers();
   const P = await DB.all('points'), T = await DB.all('tracks');
-  P.forEach(p => L.circleMarker([p.lat, p.lng], {radius: 9, color: '#12352b', weight: 2, fillColor: '#f2c230', fillOpacity: 1, bubblingMouseEvents: false}).bindTooltip(p.name, {permanent: true, direction: 'top', offset: [0, -8]}).on('click', e => busy() ? map.fire('click', {latlng: e.latlng}) : editPoint(p)).addTo(layerPts));
+  P.forEach(p => L.marker([p.lat, p.lng], {icon: PIN, keyboard: false}).bindTooltip(p.name, {permanent: true, direction: 'top'}).on('click', e => busy() ? map.fire('click', {latlng: e.latlng}) : editPoint(p)).addTo(layerPts));
   T.forEach(t => {
     const ll = t.pts.map(q => [q[1], q[0]]);
     L.polyline(ll, {color: '#e4572e', weight: 4, interactive: false}).addTo(layerTrk);
@@ -401,7 +424,6 @@ async function draw() {
       .on('click', e => busy() ? map.fire('click', {latlng: e.latlng}) : editTrack(t)).addTo(layerTrk);
     (t.photos || []).forEach(ph => L.circleMarker([ph.lat, ph.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#2b7fff', fillOpacity: 1}).addTo(layerTrk));
   });
-  layerPts.eachLayer(l => l.bringToFront());
   $('#lPts').innerHTML = P.length ? '' : '<div class="vide">Aucun point. Touchez 📍 pour en créer un.</div>';
   P.forEach(p => { const d = document.createElement('div'); d.className = 'item';
     d.innerHTML = `<div><b></b><small>${p.f && p.f.type ? p.f.type + ' · ' : ''}${p.photos.length} photo(s) · ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</small></div><button class="ed">✏️</button><button class="del">🗑</button>`;
@@ -536,13 +558,15 @@ async function buildKmz(P, T) {
   T.forEach(t => {
     let d = safe(t.name); if (used.has(d)) d += '_' + t.id; used.add(d);
     tk.push(`<Placemark><name>${esc(t.name)}</name><styleUrl>#ln</styleUrl><description>${Math.round(len(t.pts))} m${t.note ? ' — ' + esc(t.note) : ''}</description><LineString><tessellate>1</tessellate><coordinates>${t.pts.map(q => q[0] + ',' + q[1] + ',0').join(' ')}</coordinates></LineString></Placemark>`);
-    (t.photos || []).forEach((h, i) => ph.push(`<Placemark><name>${esc(t.name)} - photo ${i + 1}</name><styleUrl>#pt</styleUrl><description><![CDATA[${img('files/trajets/' + d + '/' + d + '_' + (i + 1) + '.jpg', h.blob)}]]></description><Point><coordinates>${h.lng},${h.lat},0</coordinates></Point></Placemark>`));
+    (t.photos || []).forEach((h, i) => ph.push(`<Placemark><name>${esc(t.name)} - photo ${i + 1}</name><styleUrl>#ph</styleUrl><description><![CDATA[${img('files/trajets/' + d + '/' + d + '_' + (i + 1) + '.jpg', h.blob)}]]></description><Point><coordinates>${h.lng},${h.lat},0</coordinates></Point></Placemark>`));
   });
   const folder = (n, a) => a.length ? `<Folder><name>${n}</name>${a.join('')}</Folder>` : '';
   const doc = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Relevé terrain ${day()}</name>` +
-    `<Style id="pt"><IconStyle><Icon><href>https://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon></IconStyle></Style>` +
+    `<Style id="pt"><IconStyle><scale>0.8</scale><Icon><href>files/pin.png</href></Icon><hotSpot x="0.5" y="0" xunits="fraction" yunits="fraction"/></IconStyle></Style>` +
+    `<Style id="ph"><IconStyle><Icon><href>https://maps.google.com/mapfiles/kml/shapes/camera.png</href></Icon></IconStyle></Style>` +
     `<Style id="ln"><LineStyle><color>ff2e57e4</color><width>4</width></LineStyle></Style>` +
     folder('Points', pm) + folder('Trajets', tk) + folder('Photos des trajets', ph) + `</Document></kml>`;
+  z.file('files/pin.png', PIN_SRC.split(',')[1], {base64: true});
   z.file('doc.kml', doc);
   return z.generateAsync({type: 'blob', mimeType: 'application/vnd.google-earth.kmz'});
 }
