@@ -130,6 +130,9 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
   <div class="vide" id="savInfo"></div>
   <h3>Points</h3><div id="lPts"></div>
   <h3>Trajets</h3><div id="lTrk"></div>
+  <div class="row"><button class="btn" id="lRestore">📥 Restaurer depuis Releve-Terrain</button></div>
+  <div class="row"><button class="btn" id="lImport">📂 Importer un ZIP / des fichiers</button></div>
+  <input type="file" id="iImp" multiple hidden>
   <div class="row"><button class="btn p" id="lClose">Fermer</button></div>
 </section>
 
@@ -494,6 +497,104 @@ async function draw() {
 }
 $('#bList').onclick = () => $('#fList').classList.add('on');
 $('#lClose').onclick = () => $('#fList').classList.remove('on');
+
+/* ---------- Restauration : relire Releve-Terrain ou importer un ZIP / des fichiers ---------- */
+const numeric = (a, b) => a.localeCompare(b, undefined, {numeric: true});
+const b64Blob = b => { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Blob([u], {type: 'image/jpeg'}); };
+const fieldsOf = o => { const f = {}; FIELDS.forEach(x => f[x.id] = o[x.id] || ''); return f; };
+const pointFrom = (o, photos) => ({name: o.name, f: fieldsOf(o), note: o.note || '', lat: o.lat, lng: o.lng, acc: o.precision_m ?? null, alt: null, t: o.date || new Date().toISOString(), photos});
+const trackFrom = (o, coords, photos) => ({name: o.name, note: o.note || '', t: o.date || new Date().toISOString(), mode: o.mode || 'auto', pts: coords.map((c, i) => [c[0], c[1], i]), photos});
+const report = n => alert('Import terminé : ' + n.p + ' point(s) et ' + n.t + ' trajet(s) ajoutés' + (n.skip ? ' · ' + n.skip + ' déjà présent(s), ignoré(s)' : '') + (n.err ? ' · ' + n.err + ' élément(s) illisible(s)' : '') + '.');
+async function ingestPoint(p, n, backup) {
+  if ((await DB.all('points')).some(x => x.name === p.name)) { n.skip++; return; }
+  await DB.put('points', p); n.p++; if (backup) savePointFiles(p);
+}
+async function ingestTrack(t, n, backup) {
+  if ((await DB.all('tracks')).some(x => x.name === t.name && x.t === t.t)) { n.skip++; return; }
+  t.id = await DB.put('tracks', t); n.t++; if (backup) saveTrackFiles(t);
+}
+async function importZip(file, n) {
+  const z = await JSZip.loadAsync(file), keys = Object.keys(z.files), find = re => keys.find(k => re.test(k));
+  const pf = find(/(^|\/)points\.geojson$/), tf = find(/(^|\/)trajets\.geojson$/), ff = find(/(^|\/)photos_trajets\.geojson$/), dir = k => k.replace(/[^/]*$/, '');
+  if (!pf && !tf) { n.err++; return; }
+  if (pf) {
+    const r = dir(pf);
+    for (const ft of JSON.parse(await z.file(pf).async('string')).features) {
+      const o = {...ft.properties, lat: ft.geometry.coordinates[1], lng: ft.geometry.coordinates[0]}, ph = [];
+      for (const path of o.photos || []) { const e = z.file(r + path); if (e) ph.push(await e.async('blob')); }
+      await ingestPoint(pointFrom(o, ph), n, true);
+    }
+  }
+  if (tf) {
+    const r = dir(tf), pg = ff ? JSON.parse(await z.file(ff).async('string')).features : [];
+    for (const ft of JSON.parse(await z.file(tf).async('string')).features) {
+      const ph = [];
+      for (const q of pg.filter(q => q.properties.trajet === ft.properties.name)) {
+        const e = z.file(r + q.properties.photo);
+        if (e) ph.push({blob: await e.async('blob'), lat: q.geometry.coordinates[1], lng: q.geometry.coordinates[0], t: q.properties.date});
+      }
+      await ingestTrack(trackFrom(ft.properties, ft.geometry.coordinates, ph), n, true);
+    }
+  }
+}
+async function importLoose(fs, n) {  // fichiers d'un dossier Points/<nom> ou Trajets/<nom> : .json / .geojson + photos
+  const img = {}; fs.filter(f => /\.jpe?g$/i.test(f.name)).forEach(f => img[f.name] = f);
+  for (const f of fs) {
+    try {
+      if (/\.json$/i.test(f.name)) {
+        const o = JSON.parse(await f.text()), pre = safe(o.name) + '_';
+        await ingestPoint(pointFrom(o, Object.keys(img).filter(k => k.startsWith(pre)).sort(numeric).map(k => img[k])), n, true);
+      } else if (/\.geojson$/i.test(f.name)) {
+        const gj = JSON.parse(await f.text()), ln = gj.features.find(x => x.geometry.type === 'LineString'); if (!ln) continue;
+        const ph = gj.features.filter(x => x.geometry.type === 'Point' && img[x.properties.photo])
+          .map(x => ({blob: img[x.properties.photo], lat: x.geometry.coordinates[1], lng: x.geometry.coordinates[0], t: x.properties.date}));
+        await ingestTrack(trackFrom(ln.properties, ln.geometry.coordinates, ph), n, true);
+      }
+    } catch (e) { n.err++; }
+  }
+}
+async function importFiles(fs) {
+  const n = {p: 0, t: 0, skip: 0, err: 0}, loose = [];
+  for (const f of fs) { if (/\.zip$/i.test(f.name)) { try { await importZip(f, n); } catch (e) { n.err++; } } else loose.push(f); }
+  if (loose.length) await importLoose(loose, n);
+  await draw(); report(n);
+}
+const listDir = async (path, d) => ((await P('Filesystem').readdir({path, directory: d})).files || []).map(f => typeof f === 'string' ? {name: f, type: 'directory'} : f);
+const readTxt = async (path, d) => (await P('Filesystem').readFile({path, directory: d, encoding: 'utf8'})).data;
+const readBlob = async (path, d) => b64Blob((await P('Filesystem').readFile({path, directory: d})).data);
+async function restoreFromFolder() {
+  if (!NATIVE) return alert("Cette fonction existe seulement dans l'application Android. Utilise « Importer un ZIP / des fichiers ».");
+  const n = {p: 0, t: 0, skip: 0, err: 0}; let seen = 0;
+  for (const d of ['DOCUMENTS', 'EXTERNAL']) {
+    for (const kind of ['Points', 'Trajets']) {
+      let dirs = [];
+      try { dirs = (await listDir('Releve-Terrain/' + kind, d)).filter(f => f.type === 'directory'); } catch (e) { continue; }
+      for (const f of dirs) {
+        seen++;
+        try {
+          const dir = 'Releve-Terrain/' + kind + '/' + f.name, files = await listDir(dir, d), jpg = files.filter(x => /\.jpe?g$/i.test(x.name)).map(x => x.name).sort(numeric);
+          if (kind === 'Points') {
+            const js = files.find(x => /\.json$/i.test(x.name)); if (!js) continue;
+            const ph = []; for (const k of jpg) ph.push(await readBlob(dir + '/' + k, d));
+            await ingestPoint(pointFrom(JSON.parse(await readTxt(dir + '/' + js.name, d)), ph), n, false);
+          } else {
+            const gs = files.find(x => /\.geojson$/i.test(x.name)); if (!gs) continue;
+            const gj = JSON.parse(await readTxt(dir + '/' + gs.name, d)), ln = gj.features.find(x => x.geometry.type === 'LineString'), ph = [];
+            for (const x of gj.features.filter(x => x.geometry.type === 'Point' && jpg.includes(x.properties.photo)))
+              ph.push({blob: await readBlob(dir + '/' + x.properties.photo, d), lat: x.geometry.coordinates[1], lng: x.geometry.coordinates[0], t: x.properties.date});
+            await ingestTrack(trackFrom(ln.properties, ln.geometry.coordinates, ph), n, false);
+          }
+        } catch (e) { n.err++; }
+      }
+    }
+  }
+  await draw();
+  if (!n.p && !n.t && !n.skip) alert("Aucune donnée relue. Après une réinstallation, Android peut interdire à l'application de relire ce dossier.\n\nUtilise « Importer un ZIP / des fichiers » : choisis le ZIP dans Documents/Releve-Terrain/Exports, ou les fichiers d'un point (son .json et ses photos).");
+  else report(n);
+}
+$('#lRestore').onclick = restoreFromFolder;
+$('#lImport').onclick = () => $('#iImp').click();
+$('#iImp').onchange = async e => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) { try { await importFiles(fs); } catch (err) { alert('Import impossible : ' + err.message); } } };
 
 /* ---------- Export : un seul ZIP (dossier avec photos, CSV, GeoJSON, KMZ) ---------- */
 const safe = s => s.replace(/[\\/:*?"<>|]/g, '_').trim() || 'point';
