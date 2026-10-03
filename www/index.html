@@ -43,6 +43,12 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 .bar2 span{flex:1;font-size:14px}
 .bar2 .btn{flex:none;padding:8px 12px}
 .leaflet-popup-content a{display:inline-block;padding:10px 6px;font-size:16px}
+.bar2{flex-wrap:wrap}
+#gMsg{flex:1 1 60%}
+.tools{flex:1 1 100%;display:flex;gap:6px}
+.tools .btn{flex:1;padding:8px 6px}
+.tools select{width:auto;padding:8px 6px;flex:0 0 auto}
+.vtx.sel{background:#e4572e}
 .vtx{background:#4fc3f7;border:3px solid #062a3d;border-radius:50%}
 #trkBar .btn{background:var(--bg);border-color:var(--acc)}
 #thumbs .th{position:relative}
@@ -60,7 +66,10 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
 <button id="bGps">📡 Activer le GPS</button>
 <div id="stack">
   <div class="bar2" id="ptBar" hidden><span id="ptMsg"></span><button class="btn" id="ptGps">📍 Ma position</button><button class="btn" id="ptOff">✕</button></div>
-  <div class="bar2" id="geoBar" hidden><span>Glisse un sommet · touche-le pour le supprimer · touche la carte pour prolonger</span><button class="btn p" id="gOk">✔</button><button class="btn" id="gNo">✕</button></div>
+  <div class="bar2" id="geoBar" hidden>
+    <span id="gMsg"></span><button class="btn p" id="gOk">✔</button><button class="btn" id="gNo">✕</button>
+    <div class="tools"><select id="gTol" aria-label="Tolérance"><option value="5">5 m</option><option value="10" selected>10 m</option><option value="15">15 m</option><option value="20">20 m</option><option value="30">30 m</option></select><button class="btn" id="gSimp">✂ Simplifier</button><button class="btn" id="gStr">📏 Redresser</button><button class="btn" id="gUndo">↶</button></div>
+  </div>
   <div class="bar2" id="mvBar" hidden><span>Glisse le point à sa nouvelle position</span><button class="btn p" id="mOk">✔</button><button class="btn" id="mNo">✕</button></div>
   <div id="trkBar" hidden>
     <button class="btn" id="tPhoto">📷 Photo</button>
@@ -92,7 +101,8 @@ h3{margin:20px 0 0;font-size:15px;color:var(--acc)}
   <div id="thumbs"></div>
   <div class="vide" id="pPos"></div>
   <div class="row" id="pLoc" hidden><button class="btn" id="pMap">🗺 Déplacer sur la carte (glisser)</button></div>
-  <div class="row" id="pTrk" hidden><button class="btn" id="pShape">✏️ Modifier le tracé sur la carte</button></div>
+  <div class="row" id="pTrk" hidden><button class="btn" id="pShape">✏️ Modifier / simplifier le tracé</button></div>
+  <div class="row" id="pRawRow" hidden><button class="btn" id="pRaw">↩ Rétablir le tracé d'origine</button></div>
   <div class="row">
     <button class="btn" id="pCancel">Annuler</button>
     <button class="btn p" id="pSave">Enregistrer le point</button>
@@ -247,7 +257,7 @@ function openForm(o) {
   jobs = [];
   $('#pTitle').textContent = o.title; $('#pName').value = o.name || ''; $('#pNote').value = o.note || '';
   FIELDS.forEach(f => $('#f_' + f.id).value = (o.f || {})[f.id] || '');
-  $('#custom').hidden = !!o.track; $('#pLoc').hidden = !o.gps; $('#pTrk').hidden = !o.track; showPos();
+  $('#custom').hidden = !!o.track; $('#pLoc').hidden = !o.gps; $('#pTrk').hidden = !o.track; $('#pRawRow').hidden = !(o.track && editing.rec.raw); showPos();
   $('#pSave').textContent = editing ? 'Enregistrer les modifications' : 'Enregistrer le point';
   thumbs(); $('#fPoint').classList.add('on');
 }
@@ -278,7 +288,7 @@ $('#ptOff').onclick = () => setMode(null);
 map.on('click', e => {
   const ll = e.latlng;
   if (mv) return;
-  if (geo) { geo.pts.push([ll.lng, ll.lat, Date.now()]); return drawGeo(); }
+  if (geo) { if (geo.tool) return; snap(); geo.pts.push([ll.lng, ll.lat, Date.now()]); return drawGeo(); }
   if (mapMode === 'point') {  // confirmation de la position avant l'ajout
     pend = ll;
     return L.popup({closeButton: false}).setLatLng(ll)
@@ -301,23 +311,64 @@ $('#mOk').onclick = () => { const l = mv.m.getLatLng(); target = {lat: l.lat, ln
 $('#mNo').onclick = endMv;
 
 /* Modification du tracé : sommets déplaçables, suppression, prolongement */
+const GEO_HINT = 'Glisse un sommet · touche-le pour le supprimer · touche la carte pour prolonger';
+const geoMsg = t => { $('#gMsg').textContent = t || GEO_HINT; };
+const snap = () => { geo.hist.push(geo.pts.map(q => q.slice())); if (geo.hist.length > 20) geo.hist.shift(); };  // pour ↶
 function drawGeo() {
   geo.line.setLatLngs(geo.pts.map(q => [q[1], q[0]])); geo.marks.clearLayers();
   geo.pts.forEach((q, i) => {
-    const m = L.marker([q[1], q[0]], {draggable: true, icon: L.divIcon({className: 'vtx', iconSize: [22, 22]})}).addTo(geo.marks);
+    const m = L.marker([q[1], q[0]], {draggable: true, icon: L.divIcon({className: 'vtx' + (geo.a === i ? ' sel' : ''), iconSize: [22, 22]})}).addTo(geo.marks);
+    m.on('dragstart', snap);
     m.on('drag', () => { const l = m.getLatLng(); q[0] = l.lng; q[1] = l.lat; geo.line.setLatLngs(geo.pts.map(r => [r[1], r[0]])); });
-    m.on('click', () => { if (geo.pts.length > 2 && confirm('Supprimer ce sommet ?')) { geo.pts.splice(i, 1); drawGeo(); } });
+    m.on('click', () => {
+      if (geo.tool === 'straight') {  // Redresser : sommet de départ puis sommet d'arrivée
+        if (geo.a == null) { geo.a = i; geoMsg("Redresser : touche maintenant le sommet d'arrivée"); return drawGeo(); }
+        const a = Math.min(geo.a, i), b = Math.max(geo.a, i);
+        geo.tool = null; geo.a = null; $('#gStr').classList.remove('p');
+        if (b - a < 2) { geoMsg('Rien à redresser entre ces deux sommets.'); return drawGeo(); }
+        snap(); geo.pts.splice(a + 1, b - a - 1); geoMsg('Redressé : ' + (b - a - 1) + ' sommets supprimés.'); return drawGeo();
+      }
+      if (geo.pts.length > 2 && confirm('Supprimer ce sommet ?')) { snap(); geo.pts.splice(i, 1); drawGeo(); }
+    });
   });
 }
-function endGeo() { map.removeLayer(geo.line); map.removeLayer(geo.marks); geo = null; $('#geoBar').hidden = true; layerTrk.addTo(map); $('#fPoint').classList.add('on'); }
+function simplifyPts(pts, tol) {  // Douglas-Peucker, tolérance en mètres
+  if (pts.length < 3) return pts.slice();
+  const kx = 111320 * Math.cos(pts[0][1] * Math.PI / 180), ky = 110540, X = pts.map(q => [q[0] * kx, q[1] * ky]);
+  const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+  const st = [[0, pts.length - 1]];
+  while (st.length) {
+    const [a, b] = st.pop(), [x1, y1] = X[a], dx = X[b][0] - x1, dy = X[b][1] - y1, L2 = dx * dx + dy * dy;
+    let dm = 0, im = -1;
+    for (let i = a + 1; i < b; i++) {
+      const t = L2 ? Math.max(0, Math.min(1, ((X[i][0] - x1) * dx + (X[i][1] - y1) * dy) / L2)) : 0;
+      const d = Math.hypot(X[i][0] - (x1 + t * dx), X[i][1] - (y1 + t * dy));
+      if (d > dm) { dm = d; im = i; }
+    }
+    if (dm > tol && im > 0) { keep[im] = 1; st.push([a, im], [im, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+$('#gSimp').onclick = () => {
+  const tol = +$('#gTol').value, n0 = geo.pts.length; snap();
+  geo.pts = simplifyPts(geo.pts, tol); drawGeo();
+  geoMsg('Simplifié : ' + n0 + ' → ' + geo.pts.length + ' sommets (tolérance ' + tol + ' m). ↶ pour annuler.');
+};
+$('#gStr').onclick = () => {
+  geo.tool = geo.tool ? null : 'straight'; geo.a = null; $('#gStr').classList.toggle('p', !!geo.tool);
+  geoMsg(geo.tool ? 'Redresser : touche le sommet de départ' : ''); drawGeo();
+};
+$('#gUndo').onclick = () => { if (geo.hist.length) { geo.pts = geo.hist.pop(); geo.tool = null; geo.a = null; $('#gStr').classList.remove('p'); drawGeo(); geoMsg(); } };
+function endGeo() { map.removeLayer(geo.line); map.removeLayer(geo.marks); geo = null; $('#geoBar').hidden = true; $('#gStr').classList.remove('p'); layerTrk.addTo(map); $('#fPoint').classList.add('on'); }
 $('#pShape').onclick = () => {
   const pts = (editing.pts || editing.rec.pts).map(q => q.slice());
   $('#fPoint').classList.remove('on'); map.removeLayer(layerTrk);
-  geo = {pts, line: L.polyline([], {color: '#4fc3f7', weight: 5, interactive: false}).addTo(map), marks: L.layerGroup().addTo(map)};
-  drawGeo(); map.fitBounds(pts.map(q => [q[1], q[0]]), {padding: [40, 40]}); $('#geoBar').hidden = false;
+  geo = {pts, hist: [], tool: null, a: null, line: L.polyline([], {color: '#4fc3f7', weight: 5, interactive: false}).addTo(map), marks: L.layerGroup().addTo(map)};
+  drawGeo(); geoMsg(); map.fitBounds(pts.map(q => [q[1], q[0]]), {padding: [40, 40]}); $('#geoBar').hidden = false;
 };
 $('#gOk').onclick = () => { editing.pts = geo.pts; endGeo(); showPos(); };
 $('#gNo').onclick = endGeo;
+$('#pRaw').onclick = () => { editing.pts = editing.rec.raw.map(q => q.slice()); showPos(); alert("Tracé d'origine rétabli : enregistre les modifications pour le conserver."); };
 $('#pCancel').onclick = () => { $('#fPoint').classList.remove('on'); editing = null; };
 $('#pSave').onclick = async () => {
   const name = $('#pName').value.trim();
@@ -328,7 +379,7 @@ $('#pSave').onclick = async () => {
     const l = ed.pts[ed.pts.length - 1], old = safe(ed.name);
     const pos = me ? {lat: me.lat, lng: me.lng} : l ? {lat: l[1], lng: l[0]} : map.getCenter();  // position des nouvelles photos
     ed.name = name; ed.note = note; ed.maj = now;
-    if (editing.pts) ed.pts = editing.pts;
+    if (editing.pts) { if (!ed.raw) ed.raw = ed.pts; ed.pts = editing.pts; }  // l'original reste récupérable
     ed.photos = items.map(x => x.h ? {...x.h, blob: x.b} : {blob: x.b, lat: pos.lat, lng: pos.lng, t: now});
     await DB.put('tracks', ed);
     rmDir('Trajets/' + old).then(() => saveTrackFiles(ed));
